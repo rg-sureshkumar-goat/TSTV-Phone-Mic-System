@@ -16,6 +16,13 @@ struct ConnectView: View {
                         .focused($focused)
                 }
 
+                if model.localNetworkDenied {
+                    Section {
+                        Label(StreamClient.localNetworkOff, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                    }
+                }
+
                 Section {
                     if model.desktops.isEmpty {
                         HStack(spacing: 12) {

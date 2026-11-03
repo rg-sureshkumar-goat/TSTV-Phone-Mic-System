@@ -384,11 +384,6 @@ pub fn computer_name() -> String {
 }
 
 fn advertise(desktop_name: &str) -> Option<mdns_sd::ServiceDaemon> {
-    let ips = local_ipv4s();
-    if ips.is_empty() {
-        log::warn!("No network address found; phones will need the IP address typed in");
-        return None;
-    }
     let host: String = computer_name()
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
@@ -399,16 +394,18 @@ fn advertise(desktop_name: &str) -> Option<mdns_sd::ServiceDaemon> {
             SERVICE_TYPE,
             desktop_name,
             &format!("{host}-tstv.local."),
-            &ips[..],
+            (),
             CONTROL_PORT,
             &[("proto", "1")][..],
-        )?;
+        )?
+        // Follow the computer's addresses: on campus Wi-Fi they change as the laptop roams.
+        .enable_addr_auto();
         daemon.register(info)?;
         Ok::<_, mdns_sd::Error>(daemon)
     })();
     match result {
         Ok(daemon) => {
-            log::info!("Advertising \"{desktop_name}\" on {ips:?}");
+            log::info!("Advertising \"{desktop_name}\" on {:?}", local_ipv4s());
             Some(daemon)
         }
         Err(e) => {

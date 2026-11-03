@@ -46,7 +46,7 @@ struct LiveView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(statusLine).font(.subheadline.weight(.semibold)).lineLimit(1)
                 if model.phase != .connected, let error = model.errorMessage {
-                    Text(error).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    Text(error).font(.caption).foregroundStyle(.secondary).lineLimit(4)
                 }
             }
             Spacer()

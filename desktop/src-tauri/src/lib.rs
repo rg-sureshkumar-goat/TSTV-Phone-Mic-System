@@ -68,7 +68,7 @@ fn get_setup(state: State<'_, Arc<AppState>>) -> Setup {
     Setup {
         version: env!("CARGO_PKG_VERSION"),
         desktop_name: state.net.desktop_name.clone(),
-        ips: net::local_ipv4s().iter().map(|ip| ip.to_string()).collect(),
+        ips: current_ips(),
         control_port: protocol::CONTROL_PORT,
         active_slots: ACTIVE_SLOTS,
         devices: engine::list_output_devices(),
@@ -190,7 +190,13 @@ struct SlotView {
 struct Tick {
     engine: EngineView,
     network_error: Option<String>,
+    /// Addresses phones can use right now; they change when the computer changes network.
+    ips: Vec<String>,
     slots: Vec<SlotView>,
+}
+
+fn current_ips() -> Vec<String> {
+    net::local_ipv4s().iter().map(|ip| ip.to_string()).collect()
 }
 
 /// Every 50 ms: sends meters/status to the UI. Every 500 ms: sends stats to the phones.
@@ -199,10 +205,20 @@ fn monitor(app: AppHandle, state: Arc<AppState>) {
     let mut last_stats = Instant::now();
     let mut last_log = Instant::now();
     let mut logged_concealed = [0u64; MAX_SLOTS];
+    let mut ips = current_ips();
+    let mut last_ip_check = Instant::now();
     loop {
         std::thread::sleep(Duration::from_millis(50));
         let shared = &state.engine.shared;
         let now = Instant::now();
+        if now.duration_since(last_ip_check) >= Duration::from_secs(2) {
+            last_ip_check = now;
+            let fresh = current_ips();
+            if fresh != ips {
+                log::info!("Network address changed: {ips:?} → {fresh:?}");
+                ips = fresh;
+            }
+        }
         let output_latency = shared.output_latency_ms.load() as f64;
         let running = shared.running.load(Relaxed);
         let engine = EngineView {
@@ -306,7 +322,7 @@ fn monitor(app: AppHandle, state: Arc<AppState>) {
             last_log = now;
         }
         let network_error = state.net.listen_error.lock().unwrap().clone();
-        let _ = app.emit("tick", Tick { engine, network_error, slots });
+        let _ = app.emit("tick", Tick { engine, network_error, ips: ips.clone(), slots });
     }
 }
 

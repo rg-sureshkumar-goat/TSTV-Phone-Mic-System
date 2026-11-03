@@ -5,6 +5,8 @@ import Network
 final class Discovery {
     /// Called on the main thread with the current list.
     var onChange: (([DesktopTarget]) -> Void)?
+    /// Called on the main thread with whether iOS is blocking local network access.
+    var onLocalNetworkDenied: ((Bool) -> Void)?
     private var browser: NWBrowser?
 
     func start() {
@@ -17,6 +19,16 @@ final class Discovery {
             }
             .sorted { $0.label < $1.label }
             self?.onChange?(targets)
+        }
+        browser.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .ready:
+                self?.onLocalNetworkDenied?(false)
+            case .waiting(.dns(StreamClient.dnsPolicyDenied)), .failed(.dns(StreamClient.dnsPolicyDenied)):
+                self?.onLocalNetworkDenied?(true)
+            default:
+                break
+            }
         }
         browser.start(queue: .main)
         self.browser = browser

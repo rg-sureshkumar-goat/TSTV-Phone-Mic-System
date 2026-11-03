@@ -83,6 +83,9 @@ head. Try the AirPods HQ setting both ways. Notes: tone, noise, dropouts, level.
 
 ## 4. Network
 
+**Unplug the iPhone's cable first:** while it's plugged into the Mac, the two can also reach
+each other over the cable, which would hide a Wi-Fi problem.
+
 Run test 1 and setup #1 of test 2 on each network you might use:
 
 - **Campus Wi-Fi.** Does the desktop appear in the phone's list, or did you have to type

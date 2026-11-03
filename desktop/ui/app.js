@@ -21,6 +21,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 let setup = null;
 let strips = [];
 let deviceChannels = 0;
+let shownIps = null;
 
 function meterPos(db) {
   return Math.min(1, Math.max(0, (db - METER_FLOOR_DB) / -METER_FLOOR_DB));
@@ -37,8 +38,7 @@ function fmtMs(v, digits = 0) {
 async function init() {
   setup = await invoke("get_setup");
 
-  const ips = setup.ips.length ? setup.ips.map((ip) => `<b>${ip}</b>`).join(" or ") : "<b>no network found</b>";
-  $("#connect-info").innerHTML = `Phones connect to ${ips} · port ${setup.controlPort} · or pick “${setup.desktopName}”`;
+  showConnectInfo(setup.ips);
   $("#footer-note").textContent = `v${setup.version} · Milestone 1 (${setup.activeSlots} phone)`;
   $("#log-path").textContent = `Log: ${setup.logPath}`;
 
@@ -68,6 +68,15 @@ async function init() {
 
   await listen("tick", (e) => update(e.payload));
   requestAnimationFrame(animateMeters);
+}
+
+// The address changes when the computer changes network, so this is refreshed on every tick.
+function showConnectInfo(ips) {
+  const key = ips.join();
+  if (key === shownIps) return;
+  shownIps = key;
+  const list = ips.length ? ips.map((ip) => `<b>${ip}</b>`).join(" or ") : "<b>no network found</b>";
+  $("#connect-info").innerHTML = `Phones connect to ${list} · port ${setup.controlPort} · or pick “${setup.desktopName}”`;
 }
 
 function fillDevices() {
@@ -143,6 +152,7 @@ function fillChannels(s, count, selected) {
 }
 
 function update(tick) {
+  showConnectInfo(tick.ips);
   const eng = tick.engine;
   const status = $("#engine-status");
   if (eng.running) {

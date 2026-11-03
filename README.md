@@ -155,7 +155,10 @@ Apple Account.
 | Problem | Try |
 |---|---|
 | Phone doesn't list the desktop | Type the IP address instead. Campus Wi-Fi often blocks device discovery. |
-| Phone can't connect even by IP | Phone and Mac must be on the **same network**. Campus Wi-Fi may block device-to-device traffic: use a dedicated Wi-Fi router for the phones, with the Mac on it too. Check the Mac firewall allows TSTV Phone Mics (System Settings › Network › Firewall). On the iPhone: Settings › Privacy & Security › Local Network › TSTV Mic must be on. |
+| Phone shows OFFLINE | Read the small grey text at the top of the phone screen; it says what's wrong. On a laptop on campus Wi-Fi the Mac's address changes as it moves: the desktop app always shows the current one, so if you typed an address, tap **Disconnect** and type the new one. |
+| "Local Network access is off" on the phone | iPhone Settings › Privacy & Security › Local Network › TSTV Mic: turn it on, then reopen the app. |
+| "Nothing is answering" on the phone | Is the desktop app open? Is that still its address? |
+| "Can't reach the desktop" / "didn't answer" on the phone | Campus Wi-Fi is probably stopping devices from talking to each other, even when both show the same network name. Use a dedicated Wi-Fi router for the phones, with the Mac on it too. For a quick test, turn on the iPhone's Personal Hotspot and join it from the Mac. Check the Mac firewall allows TSTV Phone Mics (System Settings › Network › Firewall). |
 | Desktop says "Output not open" | Is the StudioLive plugged in and switched on? Pick it from **Output device**. |
 | Tone/phone shows on the desktop meter but not on the board | Board channel 17 Input must be **USB**. |
 | Desktop warns "set the mixer to 48 kHz" | Set the StudioLive's sample rate to 48 kHz (it still works otherwise, slightly lower quality). |

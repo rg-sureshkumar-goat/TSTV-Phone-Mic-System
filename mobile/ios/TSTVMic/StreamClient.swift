@@ -61,7 +61,7 @@ final class StreamClient: @unchecked Sendable {
             // an error, so time the attempt out and let the app retry.
             self.queue.asyncAfter(deadline: .now() + Self.connectTimeout) {
                 guard session == self.session, !self.welcomed else { return }
-                self.finish(session, reason: "The desktop didn't answer.")
+                self.finish(session, reason: Self.notAnswering)
             }
             switch target {
             case .host(let host):
@@ -132,7 +132,7 @@ final class StreamClient: @unchecked Sendable {
             case .failed(let error), .waiting(let error):
                 conn.cancel()
                 self.resolver = nil
-                self.finish(session, reason: "Couldn't reach the desktop (\(error.localizedDescription)).")
+                self.finish(session, reason: Self.explain(error, path: conn.currentPath, host: nil))
             default:
                 break
             }
@@ -165,7 +165,7 @@ final class StreamClient: @unchecked Sendable {
             case .ready:
                 self.sendJSON(hello)
             case .waiting(let error), .failed(let error):
-                self.finish(session, reason: "Couldn't reach the desktop at \(host) (\(error.localizedDescription)).")
+                self.finish(session, reason: Self.explain(error, path: conn.currentPath, host: host))
             case .cancelled:
                 self.finish(session, reason: nil)
             default:
@@ -188,7 +188,7 @@ final class StreamClient: @unchecked Sendable {
                 self.handle(msg, session: session)
             }
             if let error {
-                self.finish(session, reason: "Connection lost (\(error.localizedDescription)).")
+                self.finish(session, reason: "The connection to the desktop was lost.")
                 return
             }
             self.receiveControl(conn, session: session)
@@ -272,6 +272,29 @@ final class StreamClient: @unchecked Sendable {
             audio = nil
             token = nil
             encoder = nil
+        }
+    }
+
+    // MARK: - Explaining failures
+
+    static let localNetworkOff = "Local Network access is off for TSTV Mic. Turn it on in Settings › Privacy & Security › Local Network, then reopen the app."
+    /// The error code for "blocked by privacy settings" (kDNSServiceErr_PolicyDenied).
+    static let dnsPolicyDenied: Int32 = -65570
+    private static let notAnswering = "The desktop didn't answer. If it's open, this network may be stopping devices from talking to each other (common on campus Wi-Fi)."
+
+    /// Turns a network error into something the talent or TD can act on.
+    private static func explain(_ error: NWError, path: NWPath?, host: String?) -> String {
+        if path?.unsatisfiedReason == .localNetworkDenied { return localNetworkOff }
+        let desktop = host.map { "the desktop at \($0)" } ?? "the desktop"
+        switch error {
+        case .dns(dnsPolicyDenied):
+            return localNetworkOff
+        case .posix(.ECONNREFUSED):
+            return "Nothing is answering at \(desktop). Is the desktop app open, and is this still its address?"
+        case .posix(.ETIMEDOUT), .posix(.EHOSTUNREACH), .posix(.EHOSTDOWN), .posix(.ENETUNREACH), .posix(.ENETDOWN):
+            return "Can't reach \(desktop). This network may be stopping devices from talking to each other (common on campus Wi-Fi)."
+        default:
+            return "Can't reach \(desktop) (\(error))."
         }
     }
 

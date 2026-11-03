@@ -28,6 +28,8 @@ final class AppModel {
     private(set) var target: DesktopTarget?
     private(set) var desktops: [DesktopTarget] = []
     private(set) var errorMessage: String?
+    /// iOS is blocking this app from the local network (permission turned off).
+    private(set) var localNetworkDenied = false
 
     private(set) var talentMuted = false
     private(set) var operatorMuted = false
@@ -78,6 +80,7 @@ final class AppModel {
             Task { @MainActor in self?.handle(event) }
         }
         discovery.onChange = { [weak self] found in self?.desktops = found }
+        discovery.onLocalNetworkDenied = { [weak self] denied in self?.localNetworkDenied = denied }
         discovery.start()
         UIDevice.current.isBatteryMonitoringEnabled = true
     }
