@@ -63,6 +63,7 @@ struct Setup {
 
 #[tauri::command]
 fn get_setup(state: State<'_, Arc<AppState>>) -> Setup {
+    log::debug!("UI requested setup");
     let s = state.settings.lock().unwrap().clone();
     Setup {
         version: env!("CARGO_PKG_VERSION"),
@@ -317,11 +318,13 @@ fn init_logging(log_dir: &std::path::Path) -> PathBuf {
     if std::fs::metadata(&path).is_ok_and(|m| m.len() > 5_000_000) {
         let _ = std::fs::rename(&path, log_dir.join("tstv-phone-mics.old.log"));
     }
+    // TSTV_LOG=debug for more detail.
+    let level = if std::env::var("TSTV_LOG").as_deref() == Ok("debug") { LevelFilter::Debug } else { LevelFilter::Info };
     let config = ConfigBuilder::new().set_time_format_rfc3339().set_time_offset_to_local().unwrap_or_else(|b| b).build();
     let mut loggers: Vec<Box<dyn SharedLogger>> =
-        vec![TermLogger::new(LevelFilter::Info, config.clone(), TerminalMode::Mixed, ColorChoice::Auto)];
+        vec![TermLogger::new(level, config.clone(), TerminalMode::Mixed, ColorChoice::Auto)];
     if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
-        loggers.push(WriteLogger::new(LevelFilter::Info, config, file));
+        loggers.push(WriteLogger::new(level, config, file));
     }
     let _ = CombinedLogger::init(loggers);
     std::panic::set_hook(Box::new(|info| log::error!("PANIC: {info}")));
