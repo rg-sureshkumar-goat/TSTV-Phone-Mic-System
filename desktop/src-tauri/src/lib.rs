@@ -119,12 +119,14 @@ fn set_mute(state: State<'_, Arc<AppState>>, slot: usize, muted: bool) {
     if slot >= MAX_SLOTS {
         return;
     }
+    log::info!("Slot {} operator {}", slot + 1, if muted { "muted" } else { "unmuted" });
     state.engine.shared.slots[slot].operator_muted.store(muted, Relaxed);
     state.net.notify_operator_mute(slot, muted);
 }
 
 #[tauri::command]
 fn mute_all(state: State<'_, Arc<AppState>>, muted: bool) {
+    log::info!("Operator {} all phones", if muted { "muted" } else { "unmuted" });
     for slot in 0..MAX_SLOTS {
         state.engine.shared.slots[slot].operator_muted.store(muted, Relaxed);
         state.net.notify_operator_mute(slot, muted);

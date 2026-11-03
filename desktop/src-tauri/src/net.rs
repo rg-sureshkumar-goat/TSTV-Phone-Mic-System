@@ -254,6 +254,12 @@ async fn handle_phone(net: Arc<Net>, stream: TcpStream, peer: SocketAddr, conn_i
                             if s.status.interrupted != interrupted {
                                 log::warn!("Slot {}: {} mic {}", slot + 1, s.name, if interrupted { "interrupted" } else { "resumed" });
                             }
+                            if s.status.talent_muted != talent_muted {
+                                log::info!("Slot {}: {} {} on the phone", slot + 1, s.name, if talent_muted { "muted" } else { "unmuted" });
+                            }
+                            if s.status.input != input {
+                                log::info!("Slot {}: {} mic is now {}", slot + 1, s.name, input.as_ref().map_or("unknown", |i| i.name.as_str()));
+                            }
                             s.status = PhoneStatus { talent_muted, input, capture_latency_ms, battery, interrupted };
                         }
                     }
