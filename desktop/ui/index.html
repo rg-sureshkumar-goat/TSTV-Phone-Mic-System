@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TSTV Phone Mics</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="dot"></span>TSTV Phone Mics</div>
+    <div class="connect" id="connect-info">Starting…</div>
+    <button id="mute-all" class="btn btn-danger-outline">Mute all phones</button>
+  </header>
+
+  <section class="toolbar">
+    <label class="field">
+      <span>Output device</span>
+      <select id="device"></select>
+    </label>
+    <div id="engine-status" class="pill">Opening audio output…</div>
+    <label class="field buffer">
+      <span>Buffer <output id="buffer-val"></output></span>
+      <input type="range" id="buffer" step="5">
+    </label>
+  </section>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main id="strips"></main>
+
+  <footer class="bottom">
+    <span id="footer-note"></span>
+    <span id="log-path" class="mono"></span>
+  </footer>
+
+  <template id="strip-template">
+    <article class="strip">
+      <header class="strip-head">
+        <span class="slot-label"></span>
+        <label class="channel-pick">Out <select class="channel"></select></label>
+      </header>
+      <div class="state pill"></div>
+      <div class="who">
+        <div class="name">—</div>
+        <div class="sub model"></div>
+        <div class="sub mic"></div>
+      </div>
+      <div class="flags">
+        <span class="flag flag-talent" hidden>Talent muted on phone</span>
+        <span class="flag flag-interrupt" hidden>Mic taken by another app</span>
+        <span class="flag flag-channel" hidden></span>
+      </div>
+      <div class="meter-row">
+        <div class="scale"></div>
+        <div class="meter"><div class="meter-cover"></div><div class="meter-peak"></div></div>
+        <div class="fader-wrap"><input type="range" class="fader" min="-60" max="12" step="0.5" value="0" title="Double-click for 0 dB"></div>
+      </div>
+      <div class="readouts">
+        <span class="level mono">−∞</span>
+        <span class="gain mono">0.0 dB</span>
+      </div>
+      <div class="buttons">
+        <button class="btn mute">Mute</button>
+        <button class="btn tone" title="1 kHz at −18 dBFS on this channel">Test tone</button>
+      </div>
+      <dl class="stats">
+        <div class="stat stat-latency"><dt>Latency (est.)</dt><dd class="latency mono">—</dd></div>
+        <div class="stat"><dt>Buffer</dt><dd class="buf mono">—</dd></div>
+        <div class="stat"><dt>Loss</dt><dd class="loss mono">—</dd></div>
+        <div class="stat"><dt>Jitter</dt><dd class="jitter mono">—</dd></div>
+        <div class="stat"><dt>Round trip</dt><dd class="rtt mono">—</dd></div>
+        <div class="stat"><dt>Battery</dt><dd class="battery mono">—</dd></div>
+      </dl>
+    </article>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
