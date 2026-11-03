@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Rust / Tauri
+target/
+desktop/src-tauri/gen/schemas/
+
+# Node
+node_modules/
+
+# Xcode
+xcuserdata/
+DerivedData/
+*.xcuserstate
+.build/
+.swiftpm/
+build/
+
+# Android (Milestone 2)
+.gradle/
+local.properties
+*.apk
