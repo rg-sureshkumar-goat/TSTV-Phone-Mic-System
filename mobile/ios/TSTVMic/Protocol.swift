@@ -1,4 +1,5 @@
 import Foundation
+import Network
 
 /// Wire format shared with the desktop app. The spec is shared/PROTOCOL.md.
 enum Wire {
@@ -51,6 +52,23 @@ enum Wire {
     }
 }
 
+/// The link in the desktop's QR code: tstvmic://join?host=…&host=…&name=…[&code=…]
+struct JoinLink {
+    var hosts: [NWEndpoint.Host]
+    var name: String
+    var code: String?
+
+    init?(_ url: URL) {
+        guard url.scheme == "tstvmic", url.host == "join",
+              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        else { return nil }
+        hosts = items.filter { $0.name == "host" }.compactMap(\.value).map { NWEndpoint.Host($0) }
+        guard !hosts.isEmpty else { return nil }
+        name = items.first { $0.name == "name" }?.value ?? "Desktop"
+        code = items.first { $0.name == "code" }?.value
+    }
+}
+
 // MARK: - Control messages (JSON over WebSocket)
 
 struct InputInfo: Codable, Equatable {
@@ -67,6 +85,8 @@ struct HelloMessage: Encodable {
     let platform = "ios"
     var model: String
     var appVersion: String
+    /// The join code, when one has been given.
+    var code: String?
 }
 
 struct StatusMessage: Encodable, Equatable {
@@ -90,12 +110,14 @@ struct Welcome: Decodable {
 
 enum DesktopMessage {
     case welcome(Welcome)
-    case reject(message: String)
+    /// `reason` is "code" when the join code is missing or wrong.
+    case reject(reason: String, message: String)
     case operatorMuted(Bool)
     case stats(latencyMs: Double, lossPct: Double, channel: Int)
 
     private struct Envelope: Decodable {
         var type: String
+        var reason: String?
         var message: String?
         var operatorMuted: Bool?
         var latencyMs: Double?
@@ -110,7 +132,7 @@ enum DesktopMessage {
         case "welcome":
             return (try? decoder.decode(Welcome.self, from: data)).map { .welcome($0) }
         case "reject":
-            return .reject(message: env.message ?? "The desktop app refused the connection.")
+            return .reject(reason: env.reason ?? "", message: env.message ?? "The desktop app refused the connection.")
         case "operator":
             return .operatorMuted(env.operatorMuted ?? false)
         case "stats":

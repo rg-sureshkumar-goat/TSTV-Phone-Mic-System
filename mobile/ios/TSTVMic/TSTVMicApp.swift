@@ -10,6 +10,7 @@ struct TSTVMicApp: App {
             ContentView()
                 .environment(model)
                 .preferredColorScheme(.dark)
+                .onOpenURL { model.open(link: $0) }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { model.appBecameActive() }

@@ -4,8 +4,9 @@ Lets TSTV News talent use their own iPhone (built-in mic or AirPods) as an on-ai
 Each phone streams over the local network to a desktop app on the studio Mac, which plays it
 out of its own USB channel into the PreSonus StudioLive 16 (phones use channels 17–21).
 
-**Status: Milestone 1** (proof of concept): one iPhone → desktop app on a Mac → USB output 17.
-The on-site test is in [docs/M1_TEST.md](docs/M1_TEST.md). Full brief: [PROJECT_BRIEF.md](PROJECT_BRIEF.md).
+**Status: Milestone 2 in progress.** The Mac app and iPhone app handle up to five phones.
+The Android and Windows apps aren't built yet. The on-site test is in
+[docs/M1_TEST.md](docs/M1_TEST.md). Full brief: [PROJECT_BRIEF.md](PROJECT_BRIEF.md).
 
 | Folder | What's in it |
 |---|---|
@@ -72,12 +73,18 @@ Drag **TSTV Phone Mics** into your **Applications** folder, then open it from th
 
 **Using it:**
 - The top bar shows the address phones connect to, e.g. `10.150.143.42`.
+- **Connect a phone** shows a QR code for talent to scan. You can also require a four-digit
+  join code there, so other phones on the network can't put audio on the board.
 - **Output device** defaults to *Automatic*: the StudioLive if it's plugged in, otherwise
   the Mac's speakers. If you pick the StudioLive by name, the app waits for it rather than
   playing anywhere else.
-- **PHONE 1** strip, from top to bottom:
-  - **Out** picks the output channel (default Ch 17).
-  - Talent name and which mic they're using.
+- There's one strip per phone, **PHONE 1** to **PHONE 5**. From top to bottom:
+  - **Out** picks the output channel (defaults: channels 17–21).
+  - Status: Live, Reconnecting, Disconnected, and so on.
+  - **Lock** keeps this slot for this phone, even if it drops or the app restarts. A phone
+    that drops normally returns to its slot anyway, unless someone else has taken it.
+  - Talent name and which mic they're using. Click the name to change it (clear it to go
+    back to the name on the phone).
   - Level meter and gain fader (double-click the fader for 0 dB).
   - **Mute**: the operator's mute. It overrides the phone and the phone shows it.
   - **Test tone**: a 1 kHz tone at −18 dBFS on that channel, so you can check routing
@@ -124,8 +131,9 @@ Apple Account.
 
 **Using the iPhone app:**
 1. Type your name (it's remembered).
-2. Tap the desktop under **Desktops on this network**. If it isn't listed, type the address
-   shown at the top of the desktop app and tap **Connect**.
+2. In the desktop app, click **Connect a phone**, then scan the QR code with the iPhone's
+   Camera or with **Scan QR code** in TSTV Mic. You can also tap the desktop under **Desktops
+   on this network**, or type the address shown at the top of the desktop app.
 3. Allow **Microphone** and **Local Network** when asked.
 4. The big button is **green = LIVE**, **red = MUTED**. Tap it to switch.
    - It also turns red with "Muted by the board operator" when the desk mutes you.
@@ -134,9 +142,11 @@ Apple Account.
    wired mics). You can switch mid-show.
 6. It keeps streaming with the screen locked. Turn on **Do Not Disturb** so calls can't
    interrupt.
-7. **Settings** (gear icon on the first screen) → *AirPods high-quality recording*
-   (iOS 26+): better sound on AirPods Pro 2 / AirPods 4, possibly more delay. Compare
-   both settings in the test.
+7. **Settings** (gear icon on the first screen):
+   - *AirPods high-quality recording* (iOS 26+): better sound on AirPods Pro 2 / AirPods 4,
+     possibly more delay. Compare both settings in the test.
+   - *Noise suppression* and *Auto gain*: off by default, since the mixer's Fat Channel
+     normally does this job.
 
 ## 4. Checking it without a phone
 
@@ -159,6 +169,9 @@ Apple Account.
 | Phone shows OFFLINE | Read the small grey text at the top of the phone screen; it says what's wrong. On a laptop on campus Wi-Fi the Mac's address changes as it moves: the desktop app always shows the current one, so if you typed an address, tap **Disconnect** and type the new one. |
 | "Local Network access is off" on the phone | iPhone Settings › Privacy & Security › Local Network › TSTV Mic: turn it on, then reopen the app. |
 | "Nothing is answering" on the phone | Is the desktop app open? Is that still its address? |
+| Phone asks for a join code | It's under **Connect a phone** in the desktop app. Scanning the QR code fills it in. |
+| "All phone slots are in use" | All five are taken or locked. Unlock a slot you don't need. |
+| Button is orange and says **NO MIC** | The phone isn't getting audio from its mic. It keeps trying to restart it; if it doesn't recover, pick another mic or reopen the app. |
 | "Can't reach the desktop" / "didn't answer" on the phone | Campus Wi-Fi is probably stopping devices from talking to each other, even when both show the same network name. Use a dedicated Wi-Fi router for the phones, with the Mac on it too. For a quick test, turn on the iPhone's Personal Hotspot and join it from the Mac. Check the Mac firewall allows TSTV Phone Mics (System Settings › Network › Firewall). |
 | Desktop says "Output not open" | Is the StudioLive plugged in and switched on? Pick it from **Output device**. |
 | Tone/phone shows on the desktop meter but not on the board | Board channel 17 Input must be **USB**. |

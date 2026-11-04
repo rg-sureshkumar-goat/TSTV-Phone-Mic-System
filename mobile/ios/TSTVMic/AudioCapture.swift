@@ -35,6 +35,9 @@ final class AudioCapture: @unchecked Sendable {
 
     /// Use the iOS 26+ full-bandwidth Bluetooth mode (AirPods Pro 2 / AirPods 4 and newer).
     var bluetoothHighQuality = false
+    /// Apple's voice processing: noise suppression, and optionally automatic gain.
+    var noiseSuppression = false
+    var autoGain = false
     /// Mic the talent picked (port uid), or nil for the system's choice.
     var preferredMicID: String?
 
@@ -159,7 +162,9 @@ final class AudioCapture: @unchecked Sendable {
         let session = AVAudioSession.sharedInstance()
         var options: AVAudioSession.CategoryOptions = [.allowBluetoothHFP]
         var mode: AVAudioSession.Mode = .measurement
-        if bluetoothHighQuality, #available(iOS 26.0, *) {
+        if noiseSuppression {
+            mode = .default
+        } else if bluetoothHighQuality, #available(iOS 26.0, *) {
             // Only allowed with the default mode. Falls back to HFP if the earbuds can't do it.
             options.insert(.bluetoothHighQualityRecording)
             mode = .default
@@ -183,6 +188,10 @@ final class AudioCapture: @unchecked Sendable {
         self.engine = engine
 
         let input = engine.inputNode
+        if noiseSuppression {
+            try input.setVoiceProcessingEnabled(true)
+            input.isVoiceProcessingAGCEnabled = autoGain
+        }
         let hwFormat = input.outputFormat(forBus: 0)
         guard hwFormat.sampleRate > 0, hwFormat.channelCount > 0 else { throw CaptureError.noInput }
 

@@ -4,6 +4,19 @@
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>TSTV Mic sends your voice to the studio mixer while you're on air.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>TSTV Mic scans the QR code shown by the studio's desktop app. The camera isn't used for anything else.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>org.tstvnews.phonemic.join</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>tstvmic</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>TSTV Mic finds and connects to the studio's desktop app on this network.</string>
 	<key>NSBonjourServices</key>

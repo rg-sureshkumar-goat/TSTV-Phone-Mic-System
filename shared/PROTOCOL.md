@@ -18,8 +18,15 @@ The desktop advertises a Bonjour/mDNS service:
 - Instance name: the desktop's display name, e.g. `TSTV Phone Mics (Studio Mac)`
 - TXT record: `proto=1`
 
-If discovery is blocked by the network, the phone can be given the desktop's IP address
-by hand (Milestone 2 adds a QR code containing the same information).
+If discovery is blocked by the network, the phone can join from the desktop's QR code, or be
+given the address by hand. The QR code holds a link, which also opens from the iPhone's Camera:
+
+```
+tstvmic://join?host=<address>[&host=<address>…]&name=<desktop name>[&code=<join code>]
+```
+
+`host` repeats for each usable address, in the order to try them. `code` is only there when the
+desktop requires one.
 
 Both ports accept IPv4 and IPv6, and phones may use either: many phone hotspots are IPv6-only.
 
@@ -40,7 +47,8 @@ Connect to `ws://<desktop-address>:47800/`. Each WebSocket text frame is one JSO
   "name": "Alex",               // talent display name
   "platform": "ios",            // "ios" | "android"
   "model": "iPhone15,3",
-  "appVersion": "0.1.0"
+  "appVersion": "0.1.0",
+  "code": "4821"                // join code; only needed if the desktop requires one
 }
 ```
 
@@ -81,7 +89,8 @@ Connect to `ws://<desktop-address>:47800/`. Each WebSocket text frame is one JSO
 { "type": "reject", "reason": "full", "message": "All phone slots are in use." }
 ```
 
-`reason` is one of `full`, `protocol` (version mismatch), `bad_hello`.
+`reason` is one of `full`, `code` (join code missing or wrong), `protocol` (version mismatch),
+`bad_hello`.
 
 **`operator`** — the board operator's mute for this phone. Sent after `welcome` and on every change.
 
@@ -99,6 +108,8 @@ Connect to `ws://<desktop-address>:47800/`. Each WebSocket text frame is one JSO
 
 - A phone's `deviceId` identifies it. If a phone connects with the same `deviceId` as an
   existing connection, the old connection is closed and the new one takes over the same slot.
+- A phone that dropped returns to the slot it left. The operator can lock a slot to one phone,
+  which keeps it reserved across drops and desktop restarts.
 - When the WebSocket closes, the desktop stops playing that phone (fades to silence).
 - Each `welcome` carries a new random `token`. UDP packets with an unknown token are ignored.
 

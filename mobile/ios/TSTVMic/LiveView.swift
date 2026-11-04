@@ -51,7 +51,7 @@ struct LiveView: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
-                if model.channel > 0 { Text("Channel \(model.channel)").font(.subheadline.weight(.semibold)) }
+                if model.channel > 0 { Text("Phone \(model.slot) · Ch \(model.channel)").font(.subheadline.weight(.semibold)).lineLimit(1) }
                 if let latency = model.latencyMs {
                     Text("≈ \(Int(latency.rounded())) ms delay").font(.caption).foregroundStyle(.secondary)
                 }

@@ -65,6 +65,10 @@ which iOS only partly reports; the clap test measures it.
 
 ## Networking notes
 
+- On a Mac the app advertises through macOS's own Bonjour service (`DNSServiceRegister`), which
+  gives correct addresses per network and removes the entry on exit. Other platforms use the
+  `mdns-sd` crate, which on the Mac mixed in addresses from other interfaces and renamed itself
+  on a conflict with its own traffic, so check it carefully on Windows.
 - Both apps work over IPv4 and IPv6. iPhone hotspots are often IPv6-only: the Mac then shows a
   stand-in IPv4 address (`192.0.0.x`) that nothing else can reach, so the desktop app doesn't
   display it. `NWProtocolWebSocket` only accepts URL endpoints, so IPv6 hosts need brackets.

@@ -17,10 +17,25 @@ final class AppModel {
     // Saved between launches
     var name: String { didSet { defaults.set(name, forKey: "name") } }
     var manualHost: String { didSet { defaults.set(manualHost, forKey: "manualHost") } }
+    var joinCode: String { didSet { defaults.set(joinCode, forKey: "joinCode") } }
     var bluetoothHighQuality: Bool {
         didSet {
             defaults.set(bluetoothHighQuality, forKey: "bluetoothHighQuality")
             capture.bluetoothHighQuality = bluetoothHighQuality
+            capture.reconfigure()
+        }
+    }
+    var noiseSuppression: Bool {
+        didSet {
+            defaults.set(noiseSuppression, forKey: "noiseSuppression")
+            capture.noiseSuppression = noiseSuppression
+            capture.reconfigure()
+        }
+    }
+    var autoGain: Bool {
+        didSet {
+            defaults.set(autoGain, forKey: "autoGain")
+            capture.autoGain = autoGain
             capture.reconfigure()
         }
     }
@@ -29,6 +44,9 @@ final class AppModel {
     private(set) var target: DesktopTarget?
     private(set) var desktops: [DesktopTarget] = []
     private(set) var errorMessage: String?
+    /// A desktop to join once the talent has entered what's missing (a name or a join code).
+    private(set) var pendingTarget: DesktopTarget?
+    private(set) var needsCode = false
     /// iOS is blocking this app from the local network (permission turned off).
     private(set) var localNetworkDenied = false
 
@@ -38,6 +56,7 @@ final class AppModel {
     /// Capture is supposed to be running but no audio is arriving from the mic.
     private(set) var micStalled = false
     private(set) var desktopName = ""
+    private(set) var slot = 0
     private(set) var channel = 0
     private(set) var latencyMs: Double?
     private(set) var lossPct = 0.0
@@ -67,7 +86,10 @@ final class AppModel {
     init() {
         name = defaults.string(forKey: "name") ?? ""
         manualHost = defaults.string(forKey: "manualHost") ?? ""
+        joinCode = defaults.string(forKey: "joinCode") ?? ""
         bluetoothHighQuality = defaults.bool(forKey: "bluetoothHighQuality")
+        noiseSuppression = defaults.bool(forKey: "noiseSuppression")
+        autoGain = defaults.bool(forKey: "autoGain")
         if let id = defaults.string(forKey: "deviceId") {
             deviceId = id
         } else {
@@ -75,6 +97,8 @@ final class AppModel {
             defaults.set(deviceId, forKey: "deviceId")
         }
         capture.bluetoothHighQuality = bluetoothHighQuality
+        capture.noiseSuppression = noiseSuppression
+        capture.autoGain = autoGain
 
         let client = self.client
         capture.onFrame = { pcm in client.sendFrame(pcm) }
@@ -91,7 +115,31 @@ final class AppModel {
     // MARK: - Actions
 
     func connect(to target: DesktopTarget) {
+        pendingTarget = nil
+        needsCode = false
         Task { await startConnection(to: target) }
+    }
+
+    /// A join link from the in-app scanner, or from the iPhone's Camera app.
+    func open(link url: URL) {
+        guard let link = JoinLink(url) else {
+            errorMessage = "That isn't a TSTV Phone Mics code."
+            return
+        }
+        if phase != .idle { disconnect() }
+        if let code = link.code { joinCode = code }
+        let target = DesktopTarget.named(link.name, hosts: link.hosts)
+        if name.trimmingCharacters(in: .whitespaces).isEmpty {
+            pendingTarget = target
+            needsCode = false
+            errorMessage = "Type your name, then tap Connect."
+        } else {
+            connect(to: target)
+        }
+    }
+
+    func connectToPending() {
+        if let pendingTarget { connect(to: pendingTarget) }
     }
 
     func connectToManualHost() {
@@ -164,7 +212,8 @@ final class AppModel {
             deviceId: deviceId,
             name: name.trimmingCharacters(in: .whitespaces),
             model: Self.modelIdentifier,
-            appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+            appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?",
+            code: joinCode.isEmpty ? nil : joinCode
         )
     }
 
@@ -175,13 +224,19 @@ final class AppModel {
             lastHost = host
             reconnectAttempts = 0
             desktopName = welcome.desktopName
+            slot = welcome.slot
             channel = welcome.channel
             errorMessage = nil
             sendStatus(force: true)
-        case .rejected(let message):
+        case .rejected(let reason, let message):
+            let rejected = target
             wantsConnection = false
             disconnect()
             errorMessage = message
+            if reason == "code" {
+                pendingTarget = rejected
+                needsCode = true
+            }
         case .operatorMuted(let muted):
             operatorMuted = muted
         case .stats(let latency, let loss, let channel):
@@ -194,10 +249,13 @@ final class AppModel {
             latencyMs = nil
             if let reason { errorMessage = reason }
             reconnectTask?.cancel()
-            // Alternate between the last known IP address (quick) and the original target
-            // (finds the desktop again if its address changed).
+            // Cycle through the last known IP address (quick) and the original target (finds
+            // the desktop again if its address changed), or each address from a QR code.
             reconnectAttempts += 1
-            let next: DesktopTarget = if reconnectAttempts % 2 == 1, let lastHost { .host(lastHost) } else { target }
+            var options: [DesktopTarget] = [target]
+            if case .named(_, let hosts) = target { options = hosts.map { .host($0) } }
+            if let lastHost { options.insert(.host(lastHost), at: 0) }
+            let next = options[(reconnectAttempts - (lastHost == nil ? 0 : 1)) % options.count]
             reconnectTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(2))
                 guard let self, !Task.isCancelled, self.wantsConnection else { return }

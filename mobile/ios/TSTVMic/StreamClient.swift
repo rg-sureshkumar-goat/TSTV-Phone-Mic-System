@@ -5,11 +5,14 @@ import Network
 enum DesktopTarget: Hashable {
     case service(name: String, endpoint: NWEndpoint)
     case host(NWEndpoint.Host)
+    /// From a QR code: a desktop and the addresses to try for it.
+    case named(String, hosts: [NWEndpoint.Host])
 
     var label: String {
         switch self {
         case .service(let name, _): name
         case .host(let host): "\(host)"
+        case .named(let name, _): name
         }
     }
 }
@@ -20,7 +23,7 @@ final class StreamClient: @unchecked Sendable {
     enum Event {
         /// `host` is the desktop's IP address, for faster reconnects.
         case connected(Welcome, host: NWEndpoint.Host)
-        case rejected(String)
+        case rejected(reason: String, message: String)
         case operatorMuted(Bool)
         case stats(latencyMs: Double, lossPct: Double, channel: Int)
         case closed(String?)
@@ -65,6 +68,9 @@ final class StreamClient: @unchecked Sendable {
             }
             switch target {
             case .host(let host):
+                self.openControl(host: host, hello: hello, session: session)
+            case .named(_, let hosts):
+                guard let host = hosts.first else { return }
                 self.openControl(host: host, hello: hello, session: session)
             case .service(_, let endpoint):
                 self.resolve(endpoint, session: session) { host in
@@ -194,8 +200,8 @@ final class StreamClient: @unchecked Sendable {
             welcomed = true
             openAudio(welcome)
             if let host { onEvent?(.connected(welcome, host: host)) }
-        case .reject(let message):
-            onEvent?(.rejected(message))
+        case .reject(let reason, let message):
+            onEvent?(.rejected(reason: reason, message: message))
             self.session += 1
             teardown()
         case .operatorMuted(let muted):

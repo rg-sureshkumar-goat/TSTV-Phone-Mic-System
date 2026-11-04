@@ -10,7 +10,7 @@ struct SettingsView: View {
             Form {
                 Section {
                     Toggle("AirPods high-quality recording", isOn: $model.bluetoothHighQuality)
-                        .disabled(!Self.highQualityAvailable)
+                        .disabled(!Self.highQualityAvailable || model.noiseSuppression)
                 } footer: {
                     Text(Self.highQualityAvailable
                          ? "Full-bandwidth sound from AirPods Pro 2, AirPods 4 and newer instead of the phone-call sound. Apple says it may add delay — compare both settings in the lip-sync test."
@@ -18,13 +18,13 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    LabeledContent("Echo cancellation", value: "Off")
-                    LabeledContent("Noise suppression", value: "Off")
-                    LabeledContent("Auto gain", value: "Off")
+                    Toggle("Noise suppression", isOn: $model.noiseSuppression)
+                    Toggle("Auto gain", isOn: $model.autoGain)
+                        .disabled(!model.noiseSuppression)
                 } header: {
                     Text("Audio processing")
                 } footer: {
-                    Text("The mixer's Fat Channel handles EQ and dynamics. Switchable processing comes in a later version.")
+                    Text("Leave these off unless there's a noise problem: the mixer's Fat Channel normally does this job. They use Apple's voice processing, which can change the sound and may add delay, and can't be combined with AirPods high-quality recording. Auto gain needs noise suppression on.")
                 }
 
                 Section("About") {
