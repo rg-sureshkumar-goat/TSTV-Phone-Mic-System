@@ -34,6 +34,12 @@ function fmtDb(db) {
   return db <= -60 ? "−∞ dB" : `${db > 0 ? "+" : ""}${db.toFixed(1)} dB`;
 }
 
+// Update text only when it changes. Rewriting a button's label while it's being pressed makes
+// the browser drop the click, and these updates run 20 times a second.
+function setText(el, text) {
+  if (el.textContent !== text) el.textContent = text;
+}
+
 function fmtMs(v, digits = 0) {
   return v == null ? "—" : `${v.toFixed(digits)} ms`;
 }
@@ -194,20 +200,20 @@ function update(tick) {
   const status = $("#engine-status");
   if (eng.running) {
     const khz = (eng.sampleRate / 1000).toFixed(eng.sampleRate % 1000 ? 1 : 0);
-    status.textContent = `Output: ${eng.device} · ${eng.channels} ch · ${khz} kHz · ${eng.outputLatencyMs.toFixed(1)} ms`;
+    const rateWarning = eng.sampleRate === 48000 ? "" : " — set the mixer to 48 kHz";
+    setText(status, `Output: ${eng.device} · ${eng.channels} ch · ${khz} kHz · ${eng.outputLatencyMs.toFixed(1)} ms${rateWarning}`);
     status.className = eng.sampleRate === 48000 ? "pill ok" : "pill warn";
-    if (eng.sampleRate !== 48000) status.textContent += " — set the mixer to 48 kHz";
   } else {
-    status.textContent = eng.error ? `Output not open: ${eng.error}` : "Opening audio output…";
+    setText(status, eng.error ? `Output not open: ${eng.error}` : "Opening audio output…");
     status.className = "pill bad";
   }
   deviceChannels = eng.running ? eng.channels : 0;
 
   const banner = $("#banner");
   banner.hidden = !tick.networkError;
-  banner.textContent = tick.networkError ?? "";
+  setText(banner, tick.networkError ?? "");
 
-  $("#mute-all").textContent = strips.length && strips.every((s) => s.operatorMuted) ? "Unmute all phones" : "Mute all phones";
+  setText($("#mute-all"), strips.length && strips.every((s) => s.operatorMuted) ? "Unmute all phones" : "Mute all phones");
 
   for (const s of strips) {
     const v = tick.slots[s.slot];
@@ -219,7 +225,7 @@ function update(tick) {
 
     const [text, cls] = STATE_TEXT[v.state] ?? [v.state, ""];
     const state = $(".state", el);
-    state.textContent = text;
+    setText(state, text);
     state.className = `state pill ${cls}`;
     el.classList.toggle("live", v.state === "live" && !v.operatorMuted);
     el.classList.toggle("alert", v.state === "no-audio" || v.interrupted);
@@ -230,26 +236,26 @@ function update(tick) {
     name.disabled = !v.canLock;
     const lock = $(".lock", el);
     lock.classList.toggle("on", v.locked);
-    lock.textContent = v.locked ? "Locked" : "Lock";
+    setText(lock, v.locked ? "Locked" : "Lock");
     lock.disabled = !v.locked && !v.canLock;
-    $(".model", el).textContent = v.model;
-    $(".mic", el).textContent = v.mic ? `Mic: ${v.mic}${v.micKind === "bluetooth" ? " (Bluetooth)" : ""}` : "";
+    setText($(".model", el), v.model);
+    setText($(".mic", el), v.mic ? `Mic: ${v.mic}${v.micKind === "bluetooth" ? " (Bluetooth)" : ""}` : "");
 
     $(".flag-talent", el).hidden = !v.talentMuted;
     $(".flag-interrupt", el).hidden = !v.interrupted;
     const badChannel = deviceChannels > 0 && v.channel > deviceChannels;
     const twin = tick.slots.find((o) => o.slot !== v.slot && o.channel === v.channel);
     $(".flag-channel", el).hidden = !badChannel && !twin;
-    $(".flag-channel", el).textContent = badChannel
+    setText($(".flag-channel", el), badChannel
       ? `This device has only ${deviceChannels} outputs`
-      : twin ? `Same output as Phone ${twin.slot + 1}` : "";
+      : twin ? `Same output as Phone ${twin.slot + 1}` : "");
 
     const mute = $(".mute", el);
     mute.classList.toggle("on", v.operatorMuted);
-    mute.textContent = v.operatorMuted ? "Muted" : "Mute";
+    setText(mute, v.operatorMuted ? "Muted" : "Mute");
     const tone = $(".tone", el);
     tone.classList.toggle("on", v.tone);
-    tone.textContent = v.tone ? "Tone on" : "Test tone";
+    setText(tone, v.tone ? "Tone on" : "Test tone");
 
     if (deviceChannels) fillChannels(s, deviceChannels, v.channel);
 
@@ -259,17 +265,17 @@ function update(tick) {
       s.peakDb = v.levelDb;
       s.peakAt = performance.now();
     }
-    $(".level", el).textContent = v.levelDb <= -119 ? "−∞" : `${v.levelDb.toFixed(1)} dBFS`;
+    setText($(".level", el), v.levelDb <= -119 ? "−∞" : `${v.levelDb.toFixed(1)} dBFS`);
 
     const lat = $(".latency", el);
-    lat.textContent = fmtMs(v.latencyMs);
+    setText(lat, fmtMs(v.latencyMs));
     lat.className = "latency mono" + (v.latencyMs == null ? "" : v.latencyMs < 100 ? " good" : v.latencyMs < 150 ? " meh" : " bad");
-    $(".buf", el).textContent = v.connected ? fmtMs(v.bufferMs) : "—";
-    $(".loss", el).textContent = v.connected ? `${v.lossPct.toFixed(1)} %` : "—";
+    setText($(".buf", el), v.connected ? fmtMs(v.bufferMs) : "—");
+    setText($(".loss", el), v.connected ? `${v.lossPct.toFixed(1)} %` : "—");
     $(".loss", el).title = `Late packets: ${v.late}, rebuilt from backup copy: ${v.recovered}, concealed: ${v.concealed}`;
-    $(".jitter", el).textContent = v.connected ? fmtMs(v.jitterMs, 1) : "—";
-    $(".rtt", el).textContent = v.connected ? fmtMs(v.rttMs, 1) : "—";
-    $(".battery", el).textContent = v.battery == null ? "—" : `${Math.round(v.battery * 100)} %`;
+    setText($(".jitter", el), v.connected ? fmtMs(v.jitterMs, 1) : "—");
+    setText($(".rtt", el), v.connected ? fmtMs(v.rttMs, 1) : "—");
+    setText($(".battery", el), v.battery == null ? "—" : `${Math.round(v.battery * 100)} %`);
   }
 }
 
