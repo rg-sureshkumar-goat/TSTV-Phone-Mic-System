@@ -616,6 +616,10 @@ fn advertise(desktop_name: &str) -> Option<mdns_sd::ServiceDaemon> {
         .collect();
     let result = (|| {
         let daemon = mdns_sd::ServiceDaemon::new()?;
+        // On the Mac, hearing loopback addresses on Wi-Fi made this library think another device
+        // had our name, so it renamed the service "... (2)".
+        daemon.disable_interface(mdns_sd::IfKind::LoopbackV4)?;
+        daemon.disable_interface(mdns_sd::IfKind::LoopbackV6)?;
         let info = mdns_sd::ServiceInfo::new(
             SERVICE_TYPE,
             desktop_name,
