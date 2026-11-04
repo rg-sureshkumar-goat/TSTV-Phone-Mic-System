@@ -14,8 +14,10 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::engine::{Engine, MAX_SLOTS, ToAudio};
 use crate::protocol::{
     self, AUDIO_PORT, CONTROL_PORT, DEFAULT_BITRATE, Datagram, DesktopMessage, InputInfo, KIND_PING, MAX_DATAGRAM,
-    PROTOCOL_VERSION, PhoneMessage, SERVICE_TYPE,
+    PROTOCOL_VERSION, PhoneMessage,
 };
+#[cfg(not(target_os = "macos"))]
+use crate::protocol::SERVICE_TYPE;
 
 /// Latest `status` from a phone.
 #[derive(Debug, Clone, Default)]
@@ -430,6 +432,78 @@ pub fn computer_name() -> String {
     std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Desktop".into())
 }
 
+#[cfg(target_os = "macos")]
+mod bonjour {
+    use std::ffi::{CString, c_char, c_void};
+
+    unsafe extern "C" {
+        // From dns_sd.h, part of the macOS system library.
+        fn DNSServiceRegister(
+            sd_ref: *mut *mut c_void,
+            flags: u32,
+            interface_index: u32,
+            name: *const c_char,
+            regtype: *const c_char,
+            domain: *const c_char,
+            host: *const c_char,
+            port_network_order: u16,
+            txt_len: u16,
+            txt_record: *const c_void,
+            callback: *const c_void,
+            context: *mut c_void,
+        ) -> i32;
+    }
+
+    /// Keeps the service advertised for as long as the process lives. The system withdraws it
+    /// when the process exits, however that happens.
+    pub struct Registration(#[allow(dead_code)] *mut c_void);
+
+    pub fn register(name: &str, regtype: &str, port: u16, txt: &[u8]) -> Result<Registration, i32> {
+        // Bonjour names are limited to 63 bytes.
+        let mut end = name.len().min(63);
+        while !name.is_char_boundary(end) {
+            end -= 1;
+        }
+        let name = CString::new(&name[..end]).map_err(|_| -1)?;
+        let regtype = CString::new(regtype).map_err(|_| -1)?;
+        let mut sd_ref = std::ptr::null_mut();
+        let err = unsafe {
+            DNSServiceRegister(
+                &mut sd_ref,
+                0,
+                0,
+                name.as_ptr(),
+                regtype.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                port.to_be(),
+                txt.len() as u16,
+                txt.as_ptr().cast(),
+                std::ptr::null(),
+                std::ptr::null_mut(),
+            )
+        };
+        if err == 0 { Ok(Registration(sd_ref)) } else { Err(err) }
+    }
+}
+
+/// On a Mac the system's own Bonjour service advertises the app: it gives the right addresses on
+/// each network, follows the Mac as it roams, and removes the entry when the app quits.
+#[cfg(target_os = "macos")]
+fn advertise(desktop_name: &str) -> Option<bonjour::Registration> {
+    match bonjour::register(desktop_name, "_tstvmic._tcp", CONTROL_PORT, b"\x07proto=1") {
+        Ok(registration) => {
+            log::info!("Advertising \"{desktop_name}\" on {:?}", phone_addresses());
+            Some(registration)
+        }
+        Err(e) => {
+            log::warn!("Bonjour advertising failed ({e}); phones will need the address typed in");
+            None
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
 fn advertise(desktop_name: &str) -> Option<mdns_sd::ServiceDaemon> {
     let host: String = computer_name()
         .chars()
