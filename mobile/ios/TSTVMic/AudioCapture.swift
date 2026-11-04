@@ -43,7 +43,7 @@ final class AudioCapture: @unchecked Sendable {
     /// Hardware sample rate of the current mic route.
     private(set) var inputSampleRate: Double = 0
 
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private var sink: AVAudioSinkNode?
     private let ring = SampleRing(capacity: 96_000)
     private let wake = DispatchSemaphore(value: 0)
@@ -51,6 +51,11 @@ final class AudioCapture: @unchecked Sendable {
     private let workerGeneration = Atomic<Int>(0)
     /// Largest sample magnitude since `takePeak()` (Float bits).
     private let peakBits = Atomic<UInt32>(0)
+    /// 10 ms frames produced so far, for noticing that audio has stopped.
+    private let framesEmitted = Atomic<Int>(0)
+    private var lastSeenFrames = 0
+    private var silentChecks = 0
+    private var restartWork: DispatchWorkItem?
 
     // Owned by the capture thread; swapped under `formatLock` when the route changes.
     private let formatLock = NSLock()
@@ -111,6 +116,23 @@ final class AudioCapture: @unchecked Sendable {
         reconfigure()
     }
 
+    /// Call about once a second. Returns false if no audio has arrived for a couple of seconds,
+    /// and keeps trying to restart capture until it does.
+    func checkAudioFlowing() -> Bool {
+        let frames = framesEmitted.load(ordering: .relaxed)
+        defer { lastSeenFrames = frames }
+        guard isRunning, !isInterrupted, frames == lastSeenFrames else {
+            silentChecks = 0
+            return true
+        }
+        silentChecks += 1
+        if silentChecks % 3 == 0 {
+            NSLog("Capture: no audio for \(silentChecks) s, restarting")
+            reconfigure()
+        }
+        return silentChecks < 2
+    }
+
     var availableMics: [MicOption] {
         (AVAudioSession.sharedInstance().availableInputs ?? []).map(MicOption.init)
     }
@@ -155,7 +177,10 @@ final class AudioCapture: @unchecked Sendable {
 
     private func startEngine() throws {
         engine.stop()
-        if let sink { engine.detach(sink) }
+        // A fresh engine every time: a reused one keeps reporting the previous route's format,
+        // and connecting with that fails silently (AirPods run at 24 kHz, the phone mic at 48).
+        let engine = AVAudioEngine()
+        self.engine = engine
 
         let input = engine.inputNode
         let hwFormat = input.outputFormat(forBus: 0)
@@ -209,9 +234,12 @@ final class AudioCapture: @unchecked Sendable {
             }
             self.onChange?()
         })
-        observers.append(nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
-            guard let self, self.isRunning, !self.isInterrupted else { return }
-            self.reconfigure()
+        observers.append(nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] note in
+            guard let self, self.isRunning, !self.isInterrupted, note.object as? AVAudioEngine === self.engine else { return }
+            // Ignore it if capture is already running on the current route.
+            if !self.engine.isRunning || session.sampleRate != self.inputSampleRate {
+                self.scheduleRestart()
+            }
         })
         observers.append(nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: session, queue: .main) { [weak self] _ in
             self?.onChange?()
@@ -219,6 +247,22 @@ final class AudioCapture: @unchecked Sendable {
         observers.append(nc.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: session, queue: .main) { [weak self] _ in
             self?.reconfigure()
         })
+    }
+
+    /// iOS can report several changes while a Bluetooth route comes up, so restart once it settles.
+    private func scheduleRestart() {
+        restartWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.isRunning, !self.isInterrupted else { return }
+            do {
+                try self.startEngine()
+            } catch {
+                NSLog("Capture restart failed: \(error)")
+            }
+            self.onChange?()
+        }
+        restartWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
     }
 
     /// Call when the app comes back to the foreground: restarts capture if iOS stopped it
@@ -298,6 +342,7 @@ final class AudioCapture: @unchecked Sendable {
             i += take
             if frameFill == Wire.frameSamples {
                 frameFill = 0
+                framesEmitted.add(1, ordering: .relaxed)
                 frame.withUnsafeBufferPointer { f in
                     var peak: Float = 0
                     for s in f { peak = max(peak, abs(s)) }

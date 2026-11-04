@@ -99,6 +99,9 @@ struct LiveView: View {
         if model.interrupted {
             return ("NO MIC", "Microphone in use by another app", .orange, "exclamationmark.triangle.fill")
         }
+        if model.micStalled {
+            return ("NO MIC", "The microphone isn't sending audio. Trying to restart it…", .orange, "exclamationmark.triangle.fill")
+        }
         return ("LIVE", "Tap to mute", Self.liveGreen, "mic.fill")
     }
 

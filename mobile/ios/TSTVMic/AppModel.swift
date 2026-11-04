@@ -35,6 +35,8 @@ final class AppModel {
     private(set) var talentMuted = false
     private(set) var operatorMuted = false
     private(set) var interrupted = false
+    /// Capture is supposed to be running but no audio is arriving from the mic.
+    private(set) var micStalled = false
     private(set) var desktopName = ""
     private(set) var channel = 0
     private(set) var latencyMs: Double?
@@ -46,7 +48,7 @@ final class AppModel {
     var showFocusTip = true
 
     /// On air = connected, not muted by anyone, mic not taken by another app.
-    var isLive: Bool { phase == .connected && !talentMuted && !operatorMuted && !interrupted }
+    var isLive: Bool { phase == .connected && !talentMuted && !operatorMuted && !interrupted && !micStalled }
 
     private let defaults = UserDefaults.standard
     private let deviceId: String
@@ -105,6 +107,7 @@ final class AppModel {
         capture.stop()
         timers.forEach { $0.invalidate() }
         timers = []
+        micStalled = false
         UIApplication.shared.isIdleTimerDisabled = false
         phase = .idle
         operatorMuted = false
@@ -209,7 +212,11 @@ final class AppModel {
             MainActor.assumeIsolated { self?.updateMeter() }
         }
         let status = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.sendStatus(force: false) }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.micStalled = !self.capture.checkAudioFlowing()
+                self.sendStatus(force: false)
+            }
         }
         timers = [meter, status]
         timers.forEach { RunLoop.main.add($0, forMode: .common) }
