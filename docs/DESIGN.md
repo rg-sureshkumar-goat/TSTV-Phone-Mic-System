@@ -63,6 +63,15 @@ which iOS only partly reports; the clap test measures it.
 - While the talent is muted, no audio leaves the phone: packets keep flowing (to keep
   timing and the network path alive) but carry no audio.
 
+## Networking notes
+
+- Both apps work over IPv4 and IPv6. iPhone hotspots are often IPv6-only: the Mac then shows a
+  stand-in IPv4 address (`192.0.0.x`) that nothing else can reach, so the desktop app doesn't
+  display it. `NWProtocolWebSocket` only accepts URL endpoints, so IPv6 hosts need brackets.
+- The desktop bundle is signed ad hoc with its bundle ID (`signingIdentity: "-"`). Without that,
+  the linker's signature gives each build a random-looking ID, and macOS kept the opened app
+  from sending Bonjour on Wi-Fi even with Local Network switched on.
+
 ## Things to revisit after the Milestone 1 test
 
 - Buffer default (40 ms), depending on measured loss and jitter on the real network.

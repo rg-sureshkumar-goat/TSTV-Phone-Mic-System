@@ -196,7 +196,7 @@ struct Tick {
 }
 
 fn current_ips() -> Vec<String> {
-    net::local_ipv4s().iter().map(|ip| ip.to_string()).collect()
+    net::phone_addresses().iter().map(|ip| ip.to_string()).collect()
 }
 
 /// Every 50 ms: sends meters/status to the UI. Every 500 ms: sends stats to the phones.

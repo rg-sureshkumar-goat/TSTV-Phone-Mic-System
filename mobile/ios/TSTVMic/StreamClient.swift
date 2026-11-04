@@ -4,12 +4,12 @@ import Network
 /// Where to connect: a desktop found by Bonjour, or an IP address typed in.
 enum DesktopTarget: Hashable {
     case service(name: String, endpoint: NWEndpoint)
-    case host(String)
+    case host(NWEndpoint.Host)
 
     var label: String {
         switch self {
         case .service(let name, _): name
-        case .host(let host): host
+        case .host(let host): "\(host)"
         }
     }
 }
@@ -19,7 +19,7 @@ enum DesktopTarget: Hashable {
 final class StreamClient: @unchecked Sendable {
     enum Event {
         /// `host` is the desktop's IP address, for faster reconnects.
-        case connected(Welcome, host: String)
+        case connected(Welcome, host: NWEndpoint.Host)
         case rejected(String)
         case operatorMuted(Bool)
         case stats(latencyMs: Double, lossPct: Double, channel: Int)
@@ -32,7 +32,7 @@ final class StreamClient: @unchecked Sendable {
     private let queue = DispatchQueue(label: "org.tstvnews.phonemic.network", qos: .userInteractive)
     private var control: NWConnection?
     private var resolver: NWConnection?
-    private var host: String?
+    private var host: NWEndpoint.Host?
     private var session = 0
     private var welcomed = false
     /// Give up on a connection attempt that hasn't been welcomed after this long.
@@ -112,13 +112,9 @@ final class StreamClient: @unchecked Sendable {
 
     // MARK: - Network queue
 
-    /// Finds the IPv4 address behind a Bonjour service.
-    private func resolve(_ endpoint: NWEndpoint, session: Int, then: @escaping (String) -> Void) {
-        let params = NWParameters.tcp
-        if let ip = params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
-            ip.version = .v4
-        }
-        let conn = NWConnection(to: endpoint, using: params)
+    /// Finds the address behind a Bonjour service (IPv4 or IPv6, whichever connects).
+    private func resolve(_ endpoint: NWEndpoint, session: Int, then: @escaping (NWEndpoint.Host) -> Void) {
+        let conn = NWConnection(to: endpoint, using: .tcp)
         resolver = conn
         conn.stateUpdateHandler = { [weak self] state in
             guard let self, session == self.session else { return }
@@ -127,7 +123,7 @@ final class StreamClient: @unchecked Sendable {
                 if case .hostPort(let host, _)? = conn.currentPath?.remoteEndpoint {
                     conn.cancel()
                     self.resolver = nil
-                    then(Self.hostString(host))
+                    then(host)
                 }
             case .failed(let error), .waiting(let error):
                 conn.cancel()
@@ -140,8 +136,8 @@ final class StreamClient: @unchecked Sendable {
         conn.start(queue: queue)
     }
 
-    private func openControl(host: String, hello: HelloMessage, session: Int) {
-        guard let url = URL(string: "ws://\(host):\(Wire.controlPort)/") else {
+    private func openControl(host: NWEndpoint.Host, hello: HelloMessage, session: Int) {
+        guard let url = Self.webSocketURL(host) else {
             finish(session, reason: "\"\(host)\" isn't a valid address.")
             return
         }
@@ -153,9 +149,6 @@ final class StreamClient: @unchecked Sendable {
         tcp.connectionTimeout = 5
         let params = NWParameters(tls: nil, tcp: tcp)
         params.defaultProtocolStack.applicationProtocols.insert(ws, at: 0)
-        if let ip = params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
-            ip.version = .v4
-        }
 
         let conn = NWConnection(to: .url(url), using: params)
         control = conn
@@ -200,7 +193,7 @@ final class StreamClient: @unchecked Sendable {
         case .welcome(let welcome):
             welcomed = true
             openAudio(welcome)
-            onEvent?(.connected(welcome, host: host ?? ""))
+            if let host { onEvent?(.connected(welcome, host: host)) }
         case .reject(let message):
             onEvent?(.rejected(message))
             self.session += 1
@@ -217,10 +210,7 @@ final class StreamClient: @unchecked Sendable {
         let params = NWParameters.udp
         // Puts the packets in the Wi-Fi voice queue (WMM AC_VO) on routers that support it.
         params.serviceClass = .interactiveVoice
-        if let ip = params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
-            ip.version = .v4
-        }
-        let conn = NWConnection(host: NWEndpoint.Host(host), port: port, using: params)
+        let conn = NWConnection(host: host, port: port, using: params)
         conn.start(queue: queue)
         receivePings(conn)
 
@@ -275,6 +265,17 @@ final class StreamClient: @unchecked Sendable {
         }
     }
 
+    /// NWProtocolWebSocket only works with URL endpoints.
+    private static func webSocketURL(_ host: NWEndpoint.Host) -> URL? {
+        var text = "\(host)"
+        if case .ipv6 = host {
+            // IPv6 needs brackets, and the "%" before a link-local address's interface name
+            // must be escaped.
+            text = "[\(text.replacingOccurrences(of: "%", with: "%25"))]"
+        }
+        return URL(string: "ws://\(text):\(Wire.controlPort)/")
+    }
+
     // MARK: - Explaining failures
 
     static let localNetworkOff = "Local Network access is off for TSTV Mic. Turn it on in Settings › Privacy & Security › Local Network, then reopen the app."
@@ -283,7 +284,7 @@ final class StreamClient: @unchecked Sendable {
     private static let notAnswering = "The desktop didn't answer. If it's open, this network may be stopping devices from talking to each other (common on campus Wi-Fi)."
 
     /// Turns a network error into something the talent or TD can act on.
-    private static func explain(_ error: NWError, path: NWPath?, host: String?) -> String {
+    private static func explain(_ error: NWError, path: NWPath?, host: NWEndpoint.Host?) -> String {
         if path?.unsatisfiedReason == .localNetworkDenied { return localNetworkOff }
         let desktop = host.map { "the desktop at \($0)" } ?? "the desktop"
         switch error {
@@ -296,16 +297,5 @@ final class StreamClient: @unchecked Sendable {
         default:
             return "Can't reach \(desktop) (\(error))."
         }
-    }
-
-    private static func hostString(_ host: NWEndpoint.Host) -> String {
-        let text: String
-        switch host {
-        case .ipv4(let addr): text = "\(addr)"
-        case .ipv6(let addr): text = "\(addr)"
-        case .name(let name, _): text = name
-        @unknown default: text = "\(host)"
-        }
-        return text.split(separator: "%").first.map(String.init) ?? text
     }
 }

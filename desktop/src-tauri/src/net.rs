@@ -1,7 +1,7 @@
 //! Network side: the WebSocket control server, the UDP audio socket, round-trip pings and
 //! Bonjour advertising. Runs on its own tokio runtime thread.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -150,11 +150,11 @@ impl Net {
 }
 
 async fn run(net: Arc<Net>) {
-    let udp = match UdpSocket::bind(("0.0.0.0", AUDIO_PORT)).await {
+    let udp = match dual_stack_udp(AUDIO_PORT) {
         Ok(s) => Arc::new(s),
         Err(e) => return listen_failed(&net, format!("Audio port {AUDIO_PORT} is busy ({e}). Is another copy running?")),
     };
-    let listener = match TcpListener::bind(("0.0.0.0", CONTROL_PORT)).await {
+    let listener = match dual_stack_tcp(CONTROL_PORT) {
         Ok(l) => l,
         Err(e) => return listen_failed(&net, format!("Control port {CONTROL_PORT} is busy ({e}). Is another copy running?")),
     };
@@ -177,12 +177,39 @@ async fn run(net: Arc<Net>) {
     }
 }
 
+/// A socket on `port` that accepts both IPv4 and IPv6: phone hotspots are often IPv6-only.
+fn dual_stack_socket(kind: socket2::Type, port: u16) -> std::io::Result<socket2::Socket> {
+    let sock = socket2::Socket::new(socket2::Domain::IPV6, kind, None)?;
+    sock.set_only_v6(false)?;
+    // Lets the app restart straight away. Not on UDP or Windows, where it would allow a second
+    // copy to share the port instead of reporting it busy.
+    #[cfg(not(windows))]
+    if kind == socket2::Type::STREAM {
+        sock.set_reuse_address(true)?;
+    }
+    sock.set_nonblocking(true)?;
+    sock.bind(&SocketAddr::from((Ipv6Addr::UNSPECIFIED, port)).into())?;
+    Ok(sock)
+}
+
+fn dual_stack_tcp(port: u16) -> std::io::Result<TcpListener> {
+    let sock = dual_stack_socket(socket2::Type::STREAM, port)?;
+    sock.listen(128)?;
+    TcpListener::from_std(sock.into())
+}
+
+fn dual_stack_udp(port: u16) -> std::io::Result<UdpSocket> {
+    UdpSocket::from_std(dual_stack_socket(socket2::Type::DGRAM, port)?.into())
+}
+
 fn listen_failed(net: &Net, msg: String) {
     log::error!("{msg}");
     *net.listen_error.lock().unwrap() = Some(msg);
 }
 
 async fn handle_phone(net: Arc<Net>, stream: TcpStream, peer: SocketAddr, conn_id: u64) {
+    // Dual-stack sockets report IPv4 peers as ::ffff:a.b.c.d; show them normally in the log.
+    let peer = SocketAddr::new(peer.ip().to_canonical(), peer.port());
     let _ = stream.set_nodelay(true);
     let ws = match tokio_tungstenite::accept_async(stream).await {
         Ok(ws) => ws,
@@ -358,17 +385,37 @@ async fn ping_loop(net: Arc<Net>, sock: Arc<UdpSocket>) {
     }
 }
 
-/// IPv4 addresses phones could use to reach this computer.
-pub fn local_ipv4s() -> Vec<IpAddr> {
+/// Addresses to show the operator for typing into a phone: the IPv4 ones, or on an
+/// IPv6-only network (many phone hotspots) one IPv6 address.
+pub fn phone_addresses() -> Vec<IpAddr> {
     let mut ips: Vec<IpAddr> = local_ip_address::list_afinet_netifas()
         .unwrap_or_default()
         .into_iter()
+        .filter(|(name, ip)| reachable_by_phones(name, *ip))
         .map(|(_, ip)| ip)
-        .filter(|ip| matches!(ip, IpAddr::V4(v4) if !v4.is_loopback() && !v4.is_link_local()))
         .collect();
     ips.sort();
     ips.dedup();
+    if ips.iter().any(IpAddr::is_ipv4) {
+        ips.retain(IpAddr::is_ipv4);
+    } else {
+        ips.truncate(1);
+    }
     ips
+}
+
+fn reachable_by_phones(interface: &str, ip: IpAddr) -> bool {
+    // VPN tunnels and Apple's device-to-device links.
+    const VIRTUAL: [&str; 4] = ["utun", "awdl", "llw", "anpi"];
+    if VIRTUAL.iter().any(|prefix| interface.starts_with(prefix)) {
+        return false;
+    }
+    match ip {
+        // 192.0.0.x is a stand-in macOS uses on IPv6-only networks; nothing else can reach it.
+        IpAddr::V4(v4) => !v4.is_loopback() && !v4.is_link_local() && v4.octets()[..3] != [192, 0, 0],
+        // Link-local addresses only work with an interface name, so they can't be typed in.
+        IpAddr::V6(v6) => !v6.is_loopback() && !v6.is_unicast_link_local(),
+    }
 }
 
 /// The computer's friendly name, e.g. "Studio Mac".
@@ -405,12 +452,56 @@ fn advertise(desktop_name: &str) -> Option<mdns_sd::ServiceDaemon> {
     })();
     match result {
         Ok(daemon) => {
-            log::info!("Advertising \"{desktop_name}\" on {:?}", local_ipv4s());
+            log::info!("Advertising \"{desktop_name}\" on {:?}", phone_addresses());
             Some(daemon)
         }
         Err(e) => {
             log::warn!("Bonjour advertising failed ({e}); phones will need the IP address typed in");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn control_port_accepts_ipv4_and_ipv6() {
+        let listener = dual_stack_tcp(0).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        for addr in [format!("127.0.0.1:{port}"), format!("[::1]:{port}")] {
+            let client = TcpStream::connect(&addr).await.unwrap();
+            let (_, peer) = listener.accept().await.unwrap();
+            assert_eq!(peer.ip().to_canonical(), client.local_addr().unwrap().ip(), "{addr}");
+        }
+    }
+
+    #[tokio::test]
+    async fn audio_port_receives_ipv4_and_replies_on_ipv6() {
+        let server = dual_stack_udp(0).unwrap();
+        let port = server.local_addr().unwrap().port();
+        for (bind, target) in [("127.0.0.1:0", format!("127.0.0.1:{port}")), ("[::1]:0", format!("[::1]:{port}"))] {
+            let client = UdpSocket::bind(bind).await.unwrap();
+            client.send_to(b"hi", &target).await.unwrap();
+            let mut buf = [0u8; 8];
+            let (n, from) = server.recv_from(&mut buf).await.unwrap();
+            assert_eq!(&buf[..n], b"hi");
+            // Replies must reach IPv4 phones too, which the socket sees as ::ffff:a.b.c.d.
+            server.send_to(b"ok", from).await.unwrap();
+            let n = client.recv(&mut buf).await.unwrap();
+            assert_eq!(&buf[..n], b"ok");
+        }
+    }
+
+    #[test]
+    fn only_addresses_phones_can_reach_are_shown() {
+        let ok = |name, ip: &str| reachable_by_phones(name, ip.parse().unwrap());
+        assert!(ok("en0", "10.146.113.55"));
+        assert!(ok("en0", "2607:fb90:e6ab:2ba:1472:5521:4233:3f97"));
+        assert!(!ok("en0", "192.0.0.2"), "macOS stand-in on IPv6-only networks");
+        assert!(!ok("en0", "fe80::1cc3:72ce:ab94:9e98"));
+        assert!(!ok("lo0", "127.0.0.1"));
+        assert!(!ok("utun3", "100.100.1.2"));
     }
 }

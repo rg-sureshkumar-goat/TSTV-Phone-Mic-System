@@ -21,11 +21,11 @@ The desktop advertises a Bonjour/mDNS service:
 If discovery is blocked by the network, the phone can be given the desktop's IP address
 by hand (Milestone 2 adds a QR code containing the same information).
 
-Phones should connect over IPv4.
+Both ports accept IPv4 and IPv6, and phones may use either: many phone hotspots are IPv6-only.
 
 ## Control channel (WebSocket)
 
-Connect to `ws://<desktop-ip>:47800/`. Each WebSocket text frame is one JSON object with a
+Connect to `ws://<desktop-address>:47800/`. Each WebSocket text frame is one JSON object with a
 `type` field. Unknown fields must be ignored, so either side can add fields later.
 
 ### Phone → desktop

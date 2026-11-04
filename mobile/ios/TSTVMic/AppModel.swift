@@ -1,4 +1,5 @@
 import AVFoundation
+import Network
 import Observation
 import UIKit
 
@@ -55,7 +56,7 @@ final class AppModel {
     private var wantsConnection = false
     private var reconnectTask: Task<Void, Never>?
     /// IP address of the desktop from the last successful connection.
-    private var lastHost: String?
+    private var lastHost: NWEndpoint.Host?
     private var reconnectAttempts = 0
     private var timers: [Timer] = []
     private var lastStatus: StatusMessage?
@@ -94,7 +95,7 @@ final class AppModel {
     func connectToManualHost() {
         let host = manualHost.trimmingCharacters(in: .whitespaces)
         guard !host.isEmpty else { return }
-        connect(to: .host(host))
+        connect(to: .host(NWEndpoint.Host(host)))
     }
 
     func disconnect() {
@@ -168,7 +169,7 @@ final class AppModel {
         switch event {
         case .connected(let welcome, let host):
             phase = .connected
-            lastHost = host.isEmpty ? nil : host
+            lastHost = host
             reconnectAttempts = 0
             desktopName = welcome.desktopName
             channel = welcome.channel

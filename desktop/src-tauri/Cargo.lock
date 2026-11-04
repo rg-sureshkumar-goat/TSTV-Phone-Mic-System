@@ -4087,6 +4087,7 @@ dependencies = [
  "serde",
  "serde_json",
  "simplelog",
+ "socket2",
  "tauri",
  "tauri-build",
  "tokio",

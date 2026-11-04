@@ -50,7 +50,12 @@ fn parse_args() -> Args {
 #[tokio::main]
 async fn main() {
     let args = parse_args();
-    let url = format!("ws://{}:{}/", args.host, protocol::CONTROL_PORT);
+    let ipv6 = args.host.contains(':');
+    let url = if ipv6 {
+        format!("ws://[{}]:{}/", args.host, protocol::CONTROL_PORT)
+    } else {
+        format!("ws://{}:{}/", args.host, protocol::CONTROL_PORT)
+    };
     println!("Connecting to {url} …");
     let (ws, _) = tokio_tungstenite::connect_async(&url).await.expect("can't reach the desktop app");
     let (mut sink, mut source) = ws.split();
@@ -88,7 +93,7 @@ async fn main() {
     });
     sink.send(Message::Text(status.to_string().into())).await.unwrap();
 
-    let sock = Arc::new(UdpSocket::bind("0.0.0.0:0").await.unwrap());
+    let sock = Arc::new(UdpSocket::bind(if ipv6 { "[::]:0" } else { "0.0.0.0:0" }).await.unwrap());
     sock.connect((args.host.as_str(), udp_port)).await.unwrap();
 
     // Answer pings.

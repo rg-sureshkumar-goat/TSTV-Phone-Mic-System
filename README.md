@@ -155,6 +155,7 @@ Apple Account.
 | Problem | Try |
 |---|---|
 | Phone doesn't list the desktop | Type the IP address instead. Campus Wi-Fi often blocks device discovery. |
+| Desktop never appears, on any network | On the Mac: System Settings › Privacy & Security › Local Network › turn on TSTV Phone Mics, then quit and reopen it. |
 | Phone shows OFFLINE | Read the small grey text at the top of the phone screen; it says what's wrong. On a laptop on campus Wi-Fi the Mac's address changes as it moves: the desktop app always shows the current one, so if you typed an address, tap **Disconnect** and type the new one. |
 | "Local Network access is off" on the phone | iPhone Settings › Privacy & Security › Local Network › TSTV Mic: turn it on, then reopen the app. |
 | "Nothing is answering" on the phone | Is the desktop app open? Is that still its address? |
