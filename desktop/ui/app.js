@@ -10,11 +10,14 @@ const PEAK_HOLD_MS = 1500;
 const FALL_DB_PER_S = 24;
 
 const STATE_TEXT = {
-  empty: ["Waiting for a phone", ""],
+  empty: ["No phone", ""],
   waiting: ["Connected – no audio yet", "warn"],
   buffering: ["Buffering…", "warn"],
   live: ["Live", "ok"],
-  "no-audio": ["No audio – check the phone", "bad"],
+  "no-audio": ["No audio – check phone", "bad"],
+  reconnecting: ["Reconnecting…", "warn"],
+  disconnected: ["Disconnected", ""],
+  reserved: ["Reserved", ""],
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -39,7 +42,7 @@ async function init() {
   setup = await invoke("get_setup");
 
   showConnectInfo(setup.ips);
-  $("#footer-note").textContent = `v${setup.version} · Milestone 1 (${setup.activeSlots} phone)`;
+  $("#footer-note").textContent = `v${setup.version}`;
   $("#log-path").textContent = `Log: ${setup.logPath}`;
 
   fillDevices();
@@ -60,6 +63,21 @@ async function init() {
     invoke("mute_all", { muted: allMuted });
   });
 
+  const panel = $("#join-panel");
+  $("#connect-phone").addEventListener("click", async () => {
+    await refreshJoin();
+    panel.showModal();
+  });
+  $("#join-close").addEventListener("click", () => panel.close());
+  $("#join-require").addEventListener("change", async (e) => {
+    await invoke("set_require_code", { on: e.target.checked });
+    refreshJoin();
+  });
+  $("#join-new-code").addEventListener("click", async () => {
+    await invoke("new_join_code");
+    refreshJoin();
+  });
+
   const main = $("#strips");
   for (let i = 0; i < setup.activeSlots; i++) {
     strips.push(makeStrip(i, setup.slots[i]));
@@ -76,7 +94,19 @@ function showConnectInfo(ips) {
   if (key === shownIps) return;
   shownIps = key;
   const list = ips.length ? ips.map((ip) => `<b>${ip}</b>`).join(" or ") : "<b>no network found</b>";
-  $("#connect-info").innerHTML = `Phones connect to ${list} · port ${setup.controlPort} · or pick “${setup.desktopName}”`;
+  $("#connect-info").innerHTML = `Phones connect to ${list}`;
+  if ($("#join-panel").open) refreshJoin();
+}
+
+async function refreshJoin() {
+  const join = await invoke("get_join");
+  $("#join-qr").innerHTML = join.qrSvg;
+  $("#join-name").textContent = setup.desktopName;
+  $("#join-ips").textContent = join.ips.length ? join.ips.join(" or ") : "no network found";
+  $("#join-require").checked = join.requireCode;
+  const code = $("#join-code");
+  code.textContent = join.code;
+  code.classList.toggle("off", !join.requireCode);
 }
 
 function fillDevices() {
@@ -135,6 +165,13 @@ function makeStrip(slot, saved) {
   fader.addEventListener("input", sendGain);
   fader.addEventListener("dblclick", () => { fader.value = 0; sendGain(); });
 
+  const name = $(".name", el);
+  name.addEventListener("change", () => invoke("set_talent_name", { slot, name: name.value }));
+  name.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === "Escape") name.blur();
+  });
+
+  $(".lock", el).addEventListener("click", () => invoke("set_lock", { slot, on: !s.locked }));
   $(".mute", el).addEventListener("click", () => invoke("set_mute", { slot, muted: !s.operatorMuted }));
   $(".tone", el).addEventListener("click", () => invoke("set_tone", { slot, on: !s.tone }));
   return s;
@@ -170,12 +207,15 @@ function update(tick) {
   banner.hidden = !tick.networkError;
   banner.textContent = tick.networkError ?? "";
 
+  $("#mute-all").textContent = strips.length && strips.every((s) => s.operatorMuted) ? "Unmute all phones" : "Mute all phones";
+
   for (const s of strips) {
     const v = tick.slots[s.slot];
     if (!v) continue;
     const el = s.el;
     s.operatorMuted = v.operatorMuted;
     s.tone = v.tone;
+    s.locked = v.locked;
 
     const [text, cls] = STATE_TEXT[v.state] ?? [v.state, ""];
     const state = $(".state", el);
@@ -183,16 +223,26 @@ function update(tick) {
     state.className = `state pill ${cls}`;
     el.classList.toggle("live", v.state === "live" && !v.operatorMuted);
     el.classList.toggle("alert", v.state === "no-audio" || v.interrupted);
+    el.classList.toggle("away", !v.connected);
 
-    $(".name", el).textContent = v.connected ? v.name : "—";
-    $(".model", el).textContent = v.connected ? v.model : "";
+    const name = $(".name", el);
+    if (document.activeElement !== name) name.value = v.name;
+    name.disabled = !v.canLock;
+    const lock = $(".lock", el);
+    lock.classList.toggle("on", v.locked);
+    lock.textContent = v.locked ? "Locked" : "Lock";
+    lock.disabled = !v.locked && !v.canLock;
+    $(".model", el).textContent = v.model;
     $(".mic", el).textContent = v.mic ? `Mic: ${v.mic}${v.micKind === "bluetooth" ? " (Bluetooth)" : ""}` : "";
 
     $(".flag-talent", el).hidden = !v.talentMuted;
     $(".flag-interrupt", el).hidden = !v.interrupted;
     const badChannel = deviceChannels > 0 && v.channel > deviceChannels;
-    $(".flag-channel", el).hidden = !badChannel;
-    $(".flag-channel", el).textContent = `This device has only ${deviceChannels} outputs`;
+    const twin = tick.slots.find((o) => o.slot !== v.slot && o.channel === v.channel);
+    $(".flag-channel", el).hidden = !badChannel && !twin;
+    $(".flag-channel", el).textContent = badChannel
+      ? `This device has only ${deviceChannels} outputs`
+      : twin ? `Same output as Phone ${twin.slot + 1}` : "";
 
     const mute = $(".mute", el);
     mute.classList.toggle("on", v.operatorMuted);

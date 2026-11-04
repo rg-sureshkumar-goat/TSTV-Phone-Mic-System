@@ -1,6 +1,7 @@
 //! Network side: the WebSocket control server, the UDP audio socket, round-trip pings and
 //! Bonjour advertising. Runs on its own tokio runtime thread.
 
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
@@ -18,6 +19,7 @@ use crate::protocol::{
 };
 #[cfg(not(target_os = "macos"))]
 use crate::protocol::SERVICE_TYPE;
+use crate::settings::SlotLock;
 
 /// Latest `status` from a phone.
 #[derive(Debug, Clone, Default)]
@@ -39,6 +41,8 @@ pub struct Session {
     conn_id: u64,
     pub device_id: String,
     pub name: String,
+    /// The name the phone gave, for when the operator clears theirs.
+    phone_name: String,
     pub model: String,
     pub token: u32,
     pub udp_addr: Option<SocketAddr>,
@@ -57,9 +61,57 @@ impl Session {
     }
 }
 
+/// The phone that last left a slot.
+pub struct LeftPhone {
+    pub device_id: String,
+    pub name: String,
+    phone_name: String,
+    pub model: String,
+    pub at: Instant,
+}
+
+/// Who may join and where, as set by the operator.
+#[derive(Default)]
+pub struct JoinRules {
+    pub require_code: bool,
+    pub code: String,
+    pub locks: [Option<SlotLock>; MAX_SLOTS],
+    pub names: HashMap<String, String>,
+}
+
+impl JoinRules {
+    /// Why a phone giving `code` can't join, if it can't.
+    fn code_problem(&self, code: Option<&str>) -> Option<&'static str> {
+        if !self.require_code {
+            return None;
+        }
+        match code.map(str::trim) {
+            Some(given) if given == self.code => None,
+            Some(given) if !given.is_empty() => Some("That join code isn't right. Check it under Connect a phone in the desktop app."),
+            _ => Some("This desktop needs a join code. It's under Connect a phone in the desktop app."),
+        }
+    }
+}
+
+/// Picks a slot for a phone, in this order: the slot it's already in, a slot locked to it, the
+/// slot it left, a free slot nobody has used, then any free slot. Locked slots stay reserved.
+fn choose_slot(device_id: &str, occupied: &[Option<&str>], locks: &[Option<&str>], left: &[Option<&str>]) -> Option<usize> {
+    let slots = 0..occupied.len();
+    let free = |i: usize| occupied[i].is_none() && locks[i].is_none_or(|owner| owner == device_id);
+    slots
+        .clone()
+        .find(|&i| occupied[i] == Some(device_id))
+        .or_else(|| slots.clone().find(|&i| locks[i] == Some(device_id)))
+        .or_else(|| slots.clone().find(|&i| left[i] == Some(device_id) && free(i)))
+        .or_else(|| slots.clone().find(|&i| left[i].is_none() && free(i)))
+        .or_else(|| slots.clone().find(|&i| free(i)))
+}
+
 pub struct Net {
     pub sessions: Mutex<[Option<Session>; MAX_SLOTS]>,
-    /// How many slots accept phones (Milestone 1: one).
+    pub left: Mutex<[Option<LeftPhone>; MAX_SLOTS]>,
+    pub rules: Mutex<JoinRules>,
+    /// How many slots accept phones.
     pub active_slots: AtomicUsize,
     pub desktop_name: String,
     pub listen_error: Mutex<Option<String>>,
@@ -69,9 +121,11 @@ pub struct Net {
 }
 
 impl Net {
-    pub fn start(engine: Arc<Engine>, desktop_name: String, active_slots: usize) -> Arc<Net> {
+    pub fn start(engine: Arc<Engine>, desktop_name: String, active_slots: usize, rules: JoinRules) -> Arc<Net> {
         let net = Arc::new(Net {
             sessions: Mutex::new(std::array::from_fn(|_| None)),
+            left: Mutex::new(std::array::from_fn(|_| None)),
+            rules: Mutex::new(rules),
             active_slots: AtomicUsize::new(active_slots),
             desktop_name,
             listen_error: Mutex::new(None),
@@ -105,14 +159,54 @@ impl Net {
         self.epoch.elapsed().as_nanos() as u64
     }
 
-    /// Gives a new phone a slot. Returns (slot index, token).
-    fn assign(&self, conn_id: u64, device_id: &str, name: &str, model: &str, tx: mpsc::UnboundedSender<Outgoing>) -> Option<(usize, u32)> {
+    /// The phone in a slot, or the one that last left it: (device id, name).
+    pub fn slot_phone(&self, slot: usize) -> Option<(String, String)> {
+        let sessions = self.sessions.lock().unwrap();
+        let left = self.left.lock().unwrap();
+        match (&sessions[slot], &left[slot]) {
+            (Some(s), _) => Some((s.device_id.clone(), s.name.clone())),
+            (None, Some(l)) => Some((l.device_id.clone(), l.name.clone())),
+            (None, None) => None,
+        }
+    }
+
+    /// Gives the slot's phone the operator's name, or back its own if `name` is empty.
+    pub fn rename(&self, slot: usize, name: &str) {
         let mut sessions = self.sessions.lock().unwrap();
+        let mut left = self.left.lock().unwrap();
+        let mut rules = self.rules.lock().unwrap();
+        let name = name.trim();
+        let (device_id, shown) = if let Some(s) = sessions[slot].as_mut() {
+            s.name = if name.is_empty() { s.phone_name.clone() } else { name.to_string() };
+            (s.device_id.clone(), s.name.clone())
+        } else if let Some(l) = left[slot].as_mut() {
+            l.name = if name.is_empty() { l.phone_name.clone() } else { name.to_string() };
+            (l.device_id.clone(), l.name.clone())
+        } else {
+            return;
+        };
+        if name.is_empty() {
+            rules.names.remove(&device_id);
+        } else {
+            rules.names.insert(device_id, shown.clone());
+        }
+        if let Some(lock) = rules.locks[slot].as_mut() {
+            lock.name = shown;
+        }
+    }
+
+    /// Gives a new phone a slot. Returns (slot index, token, name to show).
+    fn assign(&self, conn_id: u64, device_id: &str, phone_name: &str, model: &str, tx: mpsc::UnboundedSender<Outgoing>) -> Option<(usize, u32, String)> {
+        let mut sessions = self.sessions.lock().unwrap();
+        let mut left = self.left.lock().unwrap();
+        let rules = self.rules.lock().unwrap();
         let active = self.active_slots.load(Relaxed).min(MAX_SLOTS);
-        let slot = sessions[..active]
-            .iter()
-            .position(|s| s.as_ref().is_some_and(|s| s.device_id == device_id))
-            .or_else(|| sessions[..active].iter().position(|s| s.is_none()))?;
+        let occupied: Vec<_> = sessions[..active].iter().map(|s| s.as_ref().map(|s| s.device_id.as_str())).collect();
+        let locks: Vec<_> = rules.locks[..active].iter().map(|l| l.as_ref().map(|l| l.device_id.as_str())).collect();
+        let gone: Vec<_> = left[..active].iter().map(|l| l.as_ref().map(|l| l.device_id.as_str())).collect();
+        let slot = choose_slot(device_id, &occupied, &locks, &gone)?;
+        let name = rules.names.get(device_id).cloned().unwrap_or_else(|| phone_name.to_string());
+        left[slot] = None;
         if let Some(old) = sessions[slot].take() {
             log::info!("Slot {}: {} reconnected; closing old connection", slot + 1, old.name);
             let _ = old.tx.send(Outgoing::Close);
@@ -126,7 +220,8 @@ impl Net {
         sessions[slot] = Some(Session {
             conn_id,
             device_id: device_id.to_string(),
-            name: name.to_string(),
+            name: name.clone(),
+            phone_name: phone_name.to_string(),
             model: model.to_string(),
             token,
             udp_addr: None,
@@ -138,7 +233,7 @@ impl Net {
             tx,
         });
         self.engine.send(ToAudio::Reset { slot: slot as u8 });
-        Some((slot, token))
+        Some((slot, token, name))
     }
 
     fn release(&self, slot: usize, conn_id: u64) {
@@ -146,6 +241,8 @@ impl Net {
         if sessions[slot].as_ref().is_some_and(|s| s.conn_id == conn_id) {
             let s = sessions[slot].take().unwrap();
             log::info!("Slot {}: {} disconnected", slot + 1, s.name);
+            self.left.lock().unwrap()[slot] =
+                Some(LeftPhone { device_id: s.device_id, name: s.name, phone_name: s.phone_name, model: s.model, at: Instant::now() });
             self.engine.send(ToAudio::Reset { slot: slot as u8 });
         }
     }
@@ -232,7 +329,7 @@ async fn handle_phone(net: Arc<Net>, stream: TcpStream, peer: SocketAddr, conn_i
         None
     })
     .await;
-    let Ok(Some(PhoneMessage::Hello { protocol, device_id, name, platform, model, app_version })) = hello else {
+    let Ok(Some(PhoneMessage::Hello { protocol, device_id, name, platform, model, app_version, code })) = hello else {
         let reject = DesktopMessage::Reject { reason: "bad_hello".into(), message: "Expected a hello message.".into() };
         let _ = sink.send(send(&reject)).await;
         return;
@@ -246,8 +343,16 @@ async fn handle_phone(net: Arc<Net>, stream: TcpStream, peer: SocketAddr, conn_i
         return;
     }
 
+    let code_problem = net.rules.lock().unwrap().code_problem(code.as_deref());
+    if let Some(message) = code_problem {
+        log::info!("{peer}: {name} rejected, join code missing or wrong");
+        let reject = DesktopMessage::Reject { reason: "code".into(), message: message.into() };
+        let _ = sink.send(send(&reject)).await;
+        return;
+    }
+
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let Some((slot, token)) = net.assign(conn_id, &device_id, &name, &model, tx) else {
+    let Some((slot, token, name)) = net.assign(conn_id, &device_id, &name, &model, tx) else {
         log::info!("{peer}: {name} rejected, all slots in use");
         let reject = DesktopMessage::Reject { reason: "full".into(), message: "All phone slots are in use.".into() };
         let _ = sink.send(send(&reject)).await;
@@ -539,6 +644,45 @@ fn advertise(desktop_name: &str) -> Option<mdns_sd::ServiceDaemon> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_phone_returns_to_its_slot() {
+        let none = [None; 3];
+        // Already in a slot (a reconnect taking over its old connection).
+        assert_eq!(choose_slot("a", &[None, Some("a"), None], &none, &none), Some(1));
+        // Left slot 2 and comes back, even though slots 0 and 1 are free.
+        assert_eq!(choose_slot("a", &none, &none, &[None, None, Some("a")]), Some(2));
+        // Locked to slot 1, while another phone has since left slot 0.
+        assert_eq!(choose_slot("a", &none, &[None, Some("a"), None], &[Some("b"), None, None]), Some(1));
+    }
+
+    #[test]
+    fn new_phones_avoid_slots_others_may_come_back_to() {
+        let none = [None; 3];
+        assert_eq!(choose_slot("new", &none, &none, &[Some("a"), None, None]), Some(1));
+        assert_eq!(choose_slot("new", &[None, Some("b"), Some("c")], &none, &[Some("a"), None, None]), Some(0));
+    }
+
+    #[test]
+    fn locked_slots_stay_reserved_and_full_means_full() {
+        let none = [None; 3];
+        assert_eq!(choose_slot("new", &none, &[Some("a"), Some("b"), None], &none), Some(2));
+        assert_eq!(choose_slot("new", &none, &[Some("a"), Some("b"), Some("c")], &none), None);
+        assert_eq!(choose_slot("new", &[Some("a"), Some("b"), Some("c")], &none, &none), None);
+    }
+
+    #[test]
+    fn join_code_is_only_checked_when_required() {
+        let mut rules = JoinRules { code: "4821".into(), ..Default::default() };
+        assert_eq!(rules.code_problem(None), None);
+        assert_eq!(rules.code_problem(Some("wrong")), None);
+        rules.require_code = true;
+        assert!(rules.code_problem(None).is_some());
+        assert!(rules.code_problem(Some("")).is_some());
+        assert!(rules.code_problem(Some("0000")).is_some());
+        assert_eq!(rules.code_problem(Some("4821")), None);
+        assert_eq!(rules.code_problem(Some(" 4821 ")), None);
+    }
 
     #[tokio::test]
     async fn control_port_accepts_ipv4_and_ipv6() {

@@ -2,6 +2,7 @@
 //! each phone out of its own channel of the audio interface (StudioLive USB channels 17–21).
 
 pub mod engine;
+pub mod join;
 pub mod net;
 pub mod opus;
 pub mod playout;
@@ -18,12 +19,13 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use engine::{Engine, MAX_SLOTS};
-use net::Net;
+use net::{JoinRules, Net};
 use protocol::DesktopMessage;
-use settings::{MAX_BUFFER_MS, MIN_BUFFER_MS, Settings, SlotSettings};
+use settings::{MAX_BUFFER_MS, MIN_BUFFER_MS, Settings, SlotLock, SlotSettings};
 
-/// Milestone 1 accepts one phone. Milestone 2 raises this to MAX_SLOTS.
-const ACTIVE_SLOTS: usize = 1;
+const ACTIVE_SLOTS: usize = MAX_SLOTS;
+/// How long a phone that dropped shows as reconnecting, before it shows as disconnected.
+const RECONNECT_WINDOW: Duration = Duration::from_secs(20);
 /// Used in the latency estimate until the phone reports its own figure.
 const DEFAULT_CAPTURE_LATENCY_MS: f64 = 20.0;
 
@@ -143,6 +145,71 @@ fn set_tone(state: State<'_, Arc<AppState>>, slot: usize, on: bool) {
     state.engine.shared.slots[slot].tone.store(on, Relaxed);
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JoinInfo {
+    link: String,
+    qr_svg: String,
+    code: String,
+    require_code: bool,
+    ips: Vec<String>,
+}
+
+fn new_code() -> String {
+    format!("{:04}", rand::random::<u32>() % 10_000)
+}
+
+#[tauri::command]
+fn get_join(state: State<'_, Arc<AppState>>) -> JoinInfo {
+    let rules = state.net.rules.lock().unwrap();
+    let ips = current_ips();
+    let code = rules.require_code.then_some(rules.code.as_str());
+    let link = join::join_link(&ips, &state.net.desktop_name, code);
+    JoinInfo { qr_svg: join::qr_svg(&link).unwrap_or_default(), link, code: rules.code.clone(), require_code: rules.require_code, ips }
+}
+
+#[tauri::command]
+fn set_require_code(state: State<'_, Arc<AppState>>, on: bool) {
+    log::info!("Join code {}", if on { "required" } else { "not required" });
+    state.net.rules.lock().unwrap().require_code = on;
+    state.update_settings(|s| s.require_code = on);
+}
+
+#[tauri::command]
+fn new_join_code(state: State<'_, Arc<AppState>>) {
+    let code = new_code();
+    state.net.rules.lock().unwrap().code = code.clone();
+    state.update_settings(|s| s.join_code = code);
+}
+
+#[tauri::command]
+fn set_talent_name(state: State<'_, Arc<AppState>>, slot: usize, name: String) {
+    if slot >= MAX_SLOTS {
+        return;
+    }
+    state.net.rename(slot, &name);
+    let (names, lock) = {
+        let rules = state.net.rules.lock().unwrap();
+        (rules.names.clone(), rules.locks[slot].clone())
+    };
+    state.update_settings(|s| {
+        s.names = names;
+        s.slots[slot].lock = lock;
+    });
+}
+
+/// Reserves the slot for its phone (or the one that last left it), or releases it.
+#[tauri::command]
+fn set_lock(state: State<'_, Arc<AppState>>, slot: usize, on: bool) {
+    if slot >= MAX_SLOTS {
+        return;
+    }
+    let lock = if on { state.net.slot_phone(slot).map(|(device_id, name)| SlotLock { device_id, name }) } else { None };
+    log::info!("Slot {} {}", slot + 1, lock.as_ref().map_or("unlocked".to_string(), |l| format!("locked to {}", l.name)));
+    state.net.rules.lock().unwrap().locks[slot] = lock.clone();
+    state.update_settings(|s| s.slots[slot].lock = lock);
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct EngineView {
@@ -162,7 +229,11 @@ struct SlotView {
     active: bool,
     connected: bool,
     /// "empty" | "waiting" (connected, no audio yet) | "buffering" | "live" | "no-audio"
+    /// | "reconnecting" (just dropped) | "disconnected" | "reserved" (locked, phone not here yet)
     state: &'static str,
+    locked: bool,
+    /// There's a phone to lock this slot to.
+    can_lock: bool,
     name: String,
     model: String,
     mic: String,
@@ -234,6 +305,8 @@ fn monitor(app: AppHandle, state: Arc<AppState>) {
         let send_stats = now.duration_since(last_stats) >= Duration::from_millis(500);
         let write_log = now.duration_since(last_log) >= Duration::from_secs(10);
         let sessions = state.net.sessions.lock().unwrap();
+        let left = state.net.left.lock().unwrap();
+        let rules = state.net.rules.lock().unwrap();
         let mut slots = Vec::with_capacity(MAX_SLOTS);
         for i in 0..MAX_SLOTS {
             let sh = &shared.slots[i];
@@ -259,8 +332,20 @@ fn monitor(app: AppHandle, state: Arc<AppState>) {
                 operator_muted: sh.operator_muted.load(Relaxed),
                 level_db: if peak > 0.0 { 20.0 * peak.log10() } else { -120.0 },
                 state: "empty",
+                locked: rules.locks[i].is_some(),
+                can_lock: sessions[i].is_some() || left[i].is_some(),
                 ..Default::default()
             };
+            if sessions[i].is_none() {
+                if let Some(l) = &left[i] {
+                    v.name = l.name.clone();
+                    v.model = l.model.clone();
+                    v.state = if now.duration_since(l.at) < RECONNECT_WINDOW { "reconnecting" } else { "disconnected" };
+                } else if let Some(lock) = &rules.locks[i] {
+                    v.name = lock.name.clone();
+                    v.state = "reserved";
+                }
+            }
             if let Some(s) = &sessions[i] {
                 let fresh = s.last_audio.is_some_and(|t| now.duration_since(t) < Duration::from_millis(500));
                 v.connected = true;
@@ -314,6 +399,8 @@ fn monitor(app: AppHandle, state: Arc<AppState>) {
             }
             slots.push(v);
         }
+        drop(rules);
+        drop(left);
         drop(sessions);
         if send_stats {
             last_stats = now;
@@ -356,7 +443,11 @@ pub fn run() {
             let config_dir = app.path().app_config_dir()?;
             std::fs::create_dir_all(&config_dir)?;
             let settings_path = config_dir.join("settings.json");
-            let settings = Settings::load(&settings_path);
+            let mut settings = Settings::load(&settings_path);
+            if settings.join_code.is_empty() {
+                settings.join_code = new_code();
+                settings.save(&settings_path);
+            }
 
             let engine = Arc::new(Engine::start(settings.device.clone()));
             engine.shared.buffer_ms.store(settings.buffer_ms);
@@ -365,7 +456,13 @@ pub fn run() {
                 slot.gain_db.store(s.gain_db);
             }
             let desktop_name = format!("TSTV Phone Mics ({})", net::computer_name());
-            let net = Net::start(engine.clone(), desktop_name, ACTIVE_SLOTS);
+            let rules = JoinRules {
+                require_code: settings.require_code,
+                code: settings.join_code.clone(),
+                locks: std::array::from_fn(|i| settings.slots[i].lock.clone()),
+                names: settings.names.clone(),
+            };
+            let net = Net::start(engine.clone(), desktop_name, ACTIVE_SLOTS, rules);
 
             let state = Arc::new(AppState { engine, net, settings: Mutex::new(settings), settings_path, log_path });
             app.manage(state.clone());
@@ -381,7 +478,12 @@ pub fn run() {
             set_gain,
             set_mute,
             mute_all,
-            set_tone
+            set_tone,
+            get_join,
+            set_require_code,
+            new_join_code,
+            set_talent_name,
+            set_lock
         ])
         .run(tauri::generate_context!())
         .expect("error while running TSTV Phone Mics");

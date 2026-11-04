@@ -126,6 +126,9 @@ pub enum PhoneMessage {
         model: String,
         #[serde(default)]
         app_version: String,
+        /// The join code, needed when the desktop requires one.
+        #[serde(default)]
+        code: Option<String>,
     },
     Status {
         #[serde(default)]

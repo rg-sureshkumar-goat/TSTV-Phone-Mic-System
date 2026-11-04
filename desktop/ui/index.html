@@ -10,6 +10,7 @@
   <header class="top">
     <div class="brand"><span class="dot"></span>TSTV Phone Mics</div>
     <div class="connect" id="connect-info">Starting…</div>
+    <button id="connect-phone" class="btn btn-primary">Connect a phone</button>
     <button id="mute-all" class="btn btn-danger-outline">Mute all phones</button>
   </header>
 
@@ -34,15 +35,44 @@
     <span id="log-path" class="mono"></span>
   </footer>
 
+  <dialog id="join-panel">
+    <div class="join-head">
+      <h2>Connect a phone</h2>
+      <button id="join-close" class="btn">Close</button>
+    </div>
+    <div class="join-body">
+      <div id="join-qr" class="join-qr"></div>
+      <div class="join-text">
+        <ol>
+          <li><b>Scan this code</b> with the iPhone's Camera, or with <b>Scan QR code</b> in TSTV Mic.</li>
+          <li>Or tap <b id="join-name"></b> in the app's list.</li>
+          <li>Or type the address: <b id="join-ips" class="mono"></b></li>
+        </ol>
+        <label class="join-require">
+          <input type="checkbox" id="join-require">
+          Require a join code
+        </label>
+        <p class="join-hint">Stops other phones on this network joining and putting audio on the board. The QR code includes it, so only people who type the address or pick from the list need to enter it.</p>
+        <div class="join-code-row">
+          <span id="join-code" class="join-code mono"></span>
+          <button id="join-new-code" class="btn">New code</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
   <template id="strip-template">
     <article class="strip">
       <header class="strip-head">
         <span class="slot-label"></span>
         <label class="channel-pick">Out <select class="channel"></select></label>
       </header>
-      <div class="state pill"></div>
+      <div class="state-row">
+        <div class="state pill"></div>
+        <button class="btn lock" title="Keep this slot for this phone, even if it drops">Lock</button>
+      </div>
       <div class="who">
-        <div class="name">—</div>
+        <input class="name" placeholder="—" spellcheck="false" title="Click to change the name shown here. Clear it to use the phone's own." disabled>
         <div class="sub model"></div>
         <div class="sub mic"></div>
       </div>

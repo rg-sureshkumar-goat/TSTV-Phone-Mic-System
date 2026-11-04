@@ -441,6 +441,36 @@ mod tests {
     }
 
     #[test]
+    fn five_phones_each_land_on_their_own_channel_in_real_time() {
+        let (mut core, mut tx, _shared) = core();
+        let mut phones: Vec<FakePhone> =
+            (0..MAX_SLOTS).map(|i| FakePhone::new(300.0 + 200.0 * i as f64, i as u32 * 1000)).collect();
+        let mut out = vec![0f32; 64 * 480];
+        let start = Instant::now();
+        let blocks = 200;
+        for _ in 0..blocks {
+            for (slot, phone) in phones.iter_mut().enumerate() {
+                let raw = phone.next_packet();
+                let mut data = [0u8; MAX_DATAGRAM];
+                data[..raw.len()].copy_from_slice(&raw);
+                tx.push(ToAudio::Packet { slot: slot as u8, len: raw.len() as u16, data }).ok().unwrap();
+            }
+            core.render(&mut out, 64, 48_000.0);
+        }
+        let elapsed = start.elapsed();
+        let rms = rms_per_channel(&out, 64);
+        for (i, r) in rms.iter().enumerate() {
+            if (16..21).contains(&i) {
+                assert!((r - 0.354).abs() < 0.05, "channel {} rms {r}", i + 1);
+            } else {
+                assert_eq!(*r, 0.0, "channel {} not silent", i + 1);
+            }
+        }
+        // 200 blocks are 2 s of audio; this time also includes encoding all five phones.
+        assert!(elapsed < Duration::from_millis(1000), "took {elapsed:?} for 2 s of audio");
+    }
+
+    #[test]
     fn channel_beyond_device_is_ignored() {
         let (mut core, _tx, shared) = core();
         shared.slots[0].tone.store(true, Relaxed);

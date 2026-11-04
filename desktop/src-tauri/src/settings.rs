@@ -1,5 +1,6 @@
 //! Settings remembered between launches (JSON in the app's config folder).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -8,11 +9,20 @@ use crate::engine::MAX_SLOTS;
 
 pub const FIRST_PHONE_CHANNEL: u32 = 17;
 
+/// A slot reserved for one phone, so it returns to the same channel after dropping.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SlotLock {
+    pub device_id: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct SlotSettings {
     pub channel: u32,
     pub gain_db: f32,
+    pub lock: Option<SlotLock>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -23,11 +33,16 @@ pub struct Settings {
     /// Jitter buffer target in ms.
     pub buffer_ms: f32,
     pub slots: Vec<SlotSettings>,
+    /// Phones must give the join code to connect.
+    pub require_code: bool,
+    pub join_code: String,
+    /// Names the operator has given talent, by phone.
+    pub names: HashMap<String, String>,
 }
 
 impl Default for SlotSettings {
     fn default() -> Self {
-        Self { channel: FIRST_PHONE_CHANNEL, gain_db: 0.0 }
+        Self { channel: FIRST_PHONE_CHANNEL, gain_db: 0.0, lock: None }
     }
 }
 
@@ -36,7 +51,12 @@ impl Default for Settings {
         Self {
             device: None,
             buffer_ms: 40.0,
-            slots: (0..MAX_SLOTS as u32).map(|i| SlotSettings { channel: FIRST_PHONE_CHANNEL + i, gain_db: 0.0 }).collect(),
+            slots: (0..MAX_SLOTS as u32)
+                .map(|i| SlotSettings { channel: FIRST_PHONE_CHANNEL + i, ..Default::default() })
+                .collect(),
+            require_code: false,
+            join_code: String::new(),
+            names: HashMap::new(),
         }
     }
 }
@@ -87,6 +107,11 @@ mod tests {
         assert_eq!(s.slots[0].channel, 30);
         assert_eq!(s.slots[1].channel, 18);
 
+        let mut s = s;
+        s.require_code = true;
+        s.join_code = "4821".into();
+        s.names.insert("phone-a".into(), "Alex".into());
+        s.slots[2].lock = Some(SlotLock { device_id: "phone-a".into(), name: "Alex".into() });
         s.save(&path);
         assert_eq!(Settings::load(&path), s);
         std::fs::remove_dir_all(&dir).ok();

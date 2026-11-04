@@ -2,7 +2,7 @@
 //! beeping tone, so the desktop side can be tested without a phone.
 //!
 //!   cargo run --example fake_phone -- [--host 127.0.0.1] [--name "Fake Phone"]
-//!       [--freq 440] [--loss 0] [--jitter 0] [--seconds 0] [--muted]
+//!       [--freq 440] [--loss 0] [--jitter 0] [--seconds 0] [--muted] [--code 1234]
 //!
 //! --loss is the percentage of packets to drop, --jitter the maximum random extra delay
 //! in ms, --seconds 0 runs until Ctrl-C.
@@ -26,10 +26,11 @@ struct Args {
     jitter: f64,
     seconds: f64,
     muted: bool,
+    code: Option<String>,
 }
 
 fn parse_args() -> Args {
-    let mut a = Args { host: "127.0.0.1".into(), name: "Fake Phone".into(), freq: 440.0, loss: 0.0, jitter: 0.0, seconds: 0.0, muted: false };
+    let mut a = Args { host: "127.0.0.1".into(), name: "Fake Phone".into(), freq: 440.0, loss: 0.0, jitter: 0.0, seconds: 0.0, muted: false, code: None };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut value = || it.next().unwrap_or_else(|| panic!("{flag} needs a value"));
@@ -41,6 +42,7 @@ fn parse_args() -> Args {
             "--jitter" => a.jitter = value().parse().expect("--jitter"),
             "--seconds" => a.seconds = value().parse().expect("--seconds"),
             "--muted" => a.muted = true,
+            "--code" => a.code = Some(value()),
             other => panic!("unknown option {other}"),
         }
     }
@@ -63,6 +65,7 @@ async fn main() {
     let hello = json!({
         "type": "hello", "protocol": 1, "deviceId": format!("fake-{}", args.name),
         "name": args.name, "platform": "test", "model": "fake_phone", "appVersion": env!("CARGO_PKG_VERSION"),
+        "code": args.code,
     });
     sink.send(Message::Text(hello.to_string().into())).await.unwrap();
 
