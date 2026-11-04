@@ -4,14 +4,17 @@ Lets TSTV News talent use their own iPhone (built-in mic or AirPods) as an on-ai
 Each phone streams over the local network to a desktop app on the studio Mac, which plays it
 out of its own USB channel into the PreSonus StudioLive 16 (phones use channels 17–21).
 
-**Status: Milestone 2 in progress.** The Mac app and iPhone app handle up to five phones.
-The Android and Windows apps aren't built yet. The on-site test is in
+**Status: Milestone 2 in progress.** The Mac app and iPhone app handle up to five phones and
+have been tested on real devices. The Android and Windows apps are built but **not yet tested on
+real devices**: see [docs/M2_DEVICE_TESTS.md](docs/M2_DEVICE_TESTS.md). The on-site test is in
 [docs/M1_TEST.md](docs/M1_TEST.md). Full brief: [PROJECT_BRIEF.md](PROJECT_BRIEF.md).
 
 | Folder | What's in it |
 |---|---|
-| `desktop/` | Desktop app (Mac now, Windows in Milestone 2): Tauri + Rust |
+| `desktop/` | Desktop app (Mac and Windows): Tauri + Rust |
 | `mobile/ios/` | iPhone app: Swift / SwiftUI, open in Xcode |
+| `mobile/android/` | Android app: Kotlin / Jetpack Compose |
+| `.github/workflows/` | Builds the Windows installer and Android app on GitHub |
 | `shared/PROTOCOL.md` | How the two apps talk to each other |
 | `third_party/opus/` | Opus audio codec source (BSD licence), built into both apps |
 | `docs/` | On-site test procedure, design notes |
@@ -147,6 +150,12 @@ Apple Account.
      possibly more delay. Compare both settings in the test.
    - *Noise suppression* and *Auto gain*: off by default, since the mixer's Fat Channel
      normally does this job.
+
+## Windows and Android
+
+Both are downloaded from GitHub rather than built by hand. Open the repo's **Actions** tab, pick
+the latest **Build apps** run, and download from **Artifacts** (you need to be signed in to
+GitHub). Steps to install and check them are in [docs/M2_DEVICE_TESTS.md](docs/M2_DEVICE_TESTS.md).
 
 ## 4. Checking it without a phone
 

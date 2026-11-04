@@ -7,7 +7,7 @@ fn main() {
 
 /// Compiles the vendored libopus (third_party/opus/libopus) into a static library.
 fn build_opus() {
-    // Not canonicalized: on Windows that gives a \\\\?\\ path, which the MSVC compiler can't use.
+    // Not canonicalized: on Windows that gives a \\?\ path, which the MSVC compiler can't use.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../third_party/opus/libopus");
     assert!(root.join("include/opus.h").exists(), "third_party/opus/libopus is missing");
 

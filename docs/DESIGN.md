@@ -8,7 +8,7 @@ Why the system is built the way it is, and where it differs from the brief's sug
 |---|---|---|---|
 | Transport | WebRTC | Opus in plain UDP packets + JSON over WebSocket ([protocol](../shared/PROTOCOL.md)) | See below |
 | Desktop | Tauri + webrtc-rs + opus + cpal | Tauri 2 (Rust) + cpal + libopus | Same, minus WebRTC |
-| Phone | React Native (Expo) + react-native-webrtc | Native Swift (iOS); native Kotlin for Android (Milestone 2) | See below |
+| Phone | React Native (Expo) + react-native-webrtc | Native Swift (iOS); native Kotlin + Jetpack Compose (Android) | See below |
 
 ### Why not WebRTC
 
@@ -81,5 +81,11 @@ which iOS only partly reports; the clap test measures it.
 - Buffer default (40 ms), depending on measured loss and jitter on the real network.
 - Whether AirPods HQ mode is worth its delay.
 - If the delay is steady but too high, delaying video on the TriCaster.
-- Windows output: cpal's ASIO support needs Steinberg's ASIO SDK at build time; check what
-  channel layout the PreSonus WDM driver exposes.
+- Windows output: the app uses WASAPI through cpal, which only reaches the channels the PreSonus
+  driver exposes to Windows. If channels 17-21 aren't reachable, add cpal's ASIO support, which
+  needs Steinberg's ASIO SDK at build time. Untested until there's a Windows PC at the mixer.
+- Android capture uses `AudioRecord`, simple but with more delay than Oboe/AAudio. If real phones
+  measure too slow, that's the first thing to change. The `captureLatencyMs` it reports is an
+  estimate, since Android doesn't report mic delay.
+- The Android APK is debug-signed, which is fine for testing. Each GitHub build has a different
+  key, so uninstall before installing a newer one. Make a release key before Milestone 3.
