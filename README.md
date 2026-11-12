@@ -5,8 +5,9 @@ Each phone streams over the local network to a desktop app on the studio Mac, wh
 out of its own USB channel into the PreSonus StudioLive 16 (phones use channels 17–21).
 
 **Status: Milestone 2 in progress.** The Mac app and iPhone app handle up to five phones and
-have been tested on real devices. The Android and Windows apps are built but **not yet tested on
-real devices**: see [docs/M2_DEVICE_TESTS.md](docs/M2_DEVICE_TESTS.md). The on-site test is in
+have been tested on real devices. The Android and Windows apps run on real devices but each
+has an audio-gap problem to fix first. What's left is in [docs/PLAN.md](docs/PLAN.md); device test
+steps are in [docs/M2_DEVICE_TESTS.md](docs/M2_DEVICE_TESTS.md) and the on-site test in
 [docs/M1_TEST.md](docs/M1_TEST.md). Full brief: [PROJECT_BRIEF.md](PROJECT_BRIEF.md).
 
 | Folder | What's in it |
@@ -101,8 +102,11 @@ Drag **TSTV Phone Mics** into your **Applications** folder, then open it from th
   of the window).
 
 **Board prep** (done on the mixer by the TD, not by the app): on channels 17–21 set
-Input = USB, turn Gate off, name them "Phone 1"–"Phone 5", and store a scene called
-"Phone Mics". The original state is saved as scene "Before Phones".
+Input = USB, turn Gate off, name them "Phone 1"–"Phone 5", **unmute them and set their
+faders to 0 dB**, and store a scene called "Phone Mics". The original state is saved as
+scene "Before Phones". With those channels open on the board, the app's Mute and gain
+are all the operator needs; the board's own fader and mute still work as a backstop.
+The app doesn't control the mixer yet (see [docs/PLAN.md](docs/PLAN.md)).
 
 ## 3. Install the iPhone app (free, from Xcode)
 

@@ -10,7 +10,8 @@ spare Wi-Fi router.
 ## 0. Prep (10 min)
 
 1. On the StudioLive: recall scene **"Phone Mics"**. Or set channel 17 Input = **USB**,
-   Gate off, name it "Phone 1". **Don't update the mixer firmware.**
+   Gate off, name it "Phone 1", unmute it and set its fader to 0 dB. **Don't update the
+   mixer firmware.**
 2. Plug the Mac into the StudioLive by USB and open **TSTV Phone Mics**. The status pill
    should say `Output: StudioLive 16 · 64 ch · 48 kHz`.
 3. **Routing check, no phone:** press **Test tone** on PHONE 1.
